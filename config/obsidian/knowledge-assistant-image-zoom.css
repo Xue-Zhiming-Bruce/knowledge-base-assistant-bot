@@ -1,0 +1,42 @@
+/*
+ * Knowledge Assistant: readable embedded diagrams in Obsidian.
+ *
+ * Source images remain unchanged. On pointer devices, hovering an embedded
+ * image presents it against the full application viewport so dense labels are
+ * not constrained to Obsidian's reading-column width.
+ */
+
+@media (hover: hover) and (pointer: fine) {
+  .markdown-preview-view .image-embed img,
+  .markdown-source-view.mod-cm6 .image-embed img {
+    cursor: zoom-in;
+  }
+
+  .markdown-preview-view .image-embed:hover::before,
+  .markdown-source-view.mod-cm6 .image-embed:hover::before {
+    position: fixed;
+    z-index: 9998;
+    inset: 0;
+    content: "";
+    background: rgb(0 0 0 / 72%);
+    pointer-events: none;
+  }
+
+  .markdown-preview-view .image-embed:hover img,
+  .markdown-source-view.mod-cm6 .image-embed:hover img {
+    position: fixed !important;
+    z-index: 9999;
+    inset: 2vh 2vw !important;
+    width: 96vw !important;
+    height: 96vh !important;
+    max-width: 96vw !important;
+    max-height: 96vh !important;
+    box-sizing: border-box;
+    padding: 12px;
+    border-radius: 8px;
+    background: var(--background-primary);
+    box-shadow: 0 12px 56px rgb(0 0 0 / 55%);
+    object-fit: contain;
+    cursor: zoom-out;
+  }
+}

@@ -1,0 +1,97 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "knowledge-assistant"
+version = "0.1.0"
+description = "A client-independent personal knowledge engine with canonical Markdown storage."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [
+  { name = "Knowledge Assistant Contributors" },
+]
+dependencies = [
+  "httpx>=0.28,<1",
+  "markdownify>=1.2,<2",
+  "openai>=2.0,<3",
+  "opentelemetry-api>=1.37,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.37,<2",
+  "opentelemetry-sdk>=1.37,<2",
+  "Pillow>=11.3,<13",
+  "pydantic>=2.12,<3",
+  "psycopg[binary,pool]>=3.2.9,<4",
+  "python-dotenv>=1.1,<2",
+  "PyYAML>=6.0.2,<7",
+  "trafilatura>=2.0,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.16,<2",
+  "pytest>=8.4,<9",
+  "pytest-cov>=6.2,<7",
+  "ruff>=0.12,<1",
+  "types-PyYAML>=6.0.12,<7",
+]
+orchestration = [
+  "prefect>=3,<4",
+]
+
+[project.scripts]
+knowledge-assistant = "knowledge_assistant.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/knowledge_assistant"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["knowledge_assistant"]
+omit = [
+  "*/cli.py",
+  "*/infrastructure/orchestration/*.py",
+  "*/infrastructure/postgres/ingestion_repository.py",
+  "*/infrastructure/postgres/question_repository.py",
+  "*/ports/*.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 90
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "knowledge-assistant.venv"]
+
+[tool.ruff.lint]
+select = [
+  "A",
+  "B",
+  "C4",
+  "E",
+  "F",
+  "I",
+  "N",
+  "PERF",
+  "PIE",
+  "PT",
+  "RUF",
+  "SIM",
+  "UP",
+  "W",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]

@@ -1,0 +1,132 @@
+{
+  "manifest_version": "sample-corpus-v1",
+  "dataset_version": "sample-docs-v1",
+  "description": "Public-safe sample corpus of four public Substack essays about software engineering craft, careers, and AI-assisted development. The manifest records only titles, URLs, provenance, and human-authored evaluation questions with concise reference answers and required facts written in original wording. No article bodies or excerpts are included.",
+  "sources": [
+    {
+      "source_id": "sample-21-lessons",
+      "title": "21 Lessons from 14 Years at Google",
+      "url": "https://addyo.substack.com/p/21-lessons-from-14-years-at-google",
+      "provider": "substack",
+      "provenance": "Public Substack essay by Addy Osmani; verified publicly fetchable 2026-08. Only title and URL recorded here."
+    },
+    {
+      "source_id": "sample-software-factories",
+      "title": "Software Factories, Light and Dark",
+      "url": "https://addyo.substack.com/p/software-factories-light-and-dark",
+      "provider": "substack",
+      "provenance": "Public Substack essay by Addy Osmani; verified publicly fetchable 2026-08. Only title and URL recorded here."
+    },
+    {
+      "source_id": "sample-source-code",
+      "title": "Is Source Code Going Away?",
+      "url": "https://tidyfirst.substack.com/p/is-source-code-going-away",
+      "provider": "substack",
+      "provenance": "Public Substack post by Kent Beck; verified publicly fetchable 2026-08. Only title and URL recorded here."
+    },
+    {
+      "source_id": "sample-pinhole",
+      "title": "The Pinhole View of AI Value",
+      "url": "https://tidyfirst.substack.com/p/the-pinhole-view-of-ai-value",
+      "provider": "substack",
+      "provenance": "Public Substack essay by Kent Beck; verified publicly fetchable 2026-08. Only title and URL recorded here."
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "sample-q-01",
+      "source_id": "sample-21-lessons",
+      "question": "I've been at my company for years and keep hearing that being a great coder isn't enough. What do engineers actually need to get good at?",
+      "reference_answer": "The essay argues that thriving as an engineer is not the same as being the best programmer: it depends on handling the human and organizational context around the code (people, politics, alignment, ambiguity) and on staying deeply focused on understanding user problems rather than on technology alone.",
+      "required_facts": [
+        "Engineers who thrive manage the human and organizational context around code (people, politics, alignment, ambiguity) rather than only writing great code.",
+        "The author recommends becoming obsessed with understanding user problems and letting solutions emerge."
+      ],
+      "question_type": "fact",
+      "difficulty": "easy"
+    },
+    {
+      "case_id": "sample-q-02",
+      "source_id": "sample-21-lessons",
+      "question": "My team is stuck debating the perfect architecture for something we haven't built yet. What would the essay advise?",
+      "reference_answer": "The essay warns that aiming for a perfect design before anything exists is paralyzing; the right design emerges from real-world use, not from thinking alone. Its advice is to iterate from a rough first attempt to a correct, refined version: get an early prototype in front of users and learn from their feedback.",
+      "required_facts": [
+        "The quest for perfection is paralyzing.",
+        "The article advises iterating from a rough first attempt to a correct, refined version."
+      ],
+      "question_type": "explanation",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-03",
+      "source_id": "sample-software-factories",
+      "question": "A colleague described our new agent setup as a 'software factory'. What's the difference between a loop, a harness, and a factory in that framing?",
+      "reference_answer": "A loop is one agent doing a single job on repeat: gather context, take an action, check the result, and go again until some condition is met. A harness is the environment around a loop: the sandbox it runs in, the tools it can reach, the memory that survives between runs, and the gates that decide what done means. A software factory is many harnessed loops running at once, fed by a queue of work whose output passes a review gate before production.",
+      "required_facts": [
+        "A loop is one agent doing a single job on repeat.",
+        "A harness is the sandbox, tools, memory, and gates around a loop.",
+        "A software factory is many harnessed loops fed by a queue whose output passes a review gate."
+      ],
+      "question_type": "explanation",
+      "difficulty": "hard"
+    },
+    {
+      "case_id": "sample-q-04",
+      "source_id": "sample-software-factories",
+      "question": "The article talks about light and dark factories. What is the trade-off it describes between keeping humans in the loop and not?",
+      "reference_answer": "A light factory runs the loop with humans in it, trading judgment and concentration against speed and breakage. A dark factory ignores the humans and lets agents scope, build, and ship code without anyone really reading the details. The risk the article highlights is that when people no longer read the software's output, they lose their understanding of it.",
+      "required_facts": [
+        "A light factory runs the loop with humans in it.",
+        "A dark factory lets agents scope, build, and ship without people reading the details.",
+        "When people no longer read the software's output, they lose their understanding of it."
+      ],
+      "question_type": "comparison",
+      "difficulty": "hard"
+    },
+    {
+      "case_id": "sample-q-05",
+      "source_id": "sample-pinhole",
+      "question": "My leadership keeps evaluating AI purely by how many people we can cut. Is that the right lens?",
+      "reference_answer": "The essay argues that focusing only on headcount reduction is like saying the only value of a car is that you don't have to pay for a horse. Labor replacement looks at value creation through a tiny pinhole: cost reduction is one way AI creates value, but it is not the only way and not necessarily the most important one.",
+      "required_facts": [
+        "Labor replacement looks at value creation through a tiny pinhole.",
+        "Cost reduction is one way AI creates value, but not the only way."
+      ],
+      "question_type": "explanation",
+      "difficulty": "easy"
+    },
+    {
+      "case_id": "sample-q-06",
+      "source_id": "sample-pinhole",
+      "question": "What analogy does the essay use to argue that headcount reduction is a narrow view of AI's value?",
+      "reference_answer": "It compares focusing only on headcount reduction to saying the only value of a car is that you don't have to pay for a horse.",
+      "required_facts": [
+        "The essay compares headcount-only thinking to saying the only value of a car is not paying for a horse."
+      ],
+      "question_type": "exact_lookup",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-07",
+      "source_id": "sample-source-code",
+      "question": "Kent Beck shared an early idea about source code going away. What is the gist of the post?",
+      "reference_answer": "The post is an early-stage idea: developers who work with AI ('Augmented Developers') are pushing the model to produce code that, once run, yields the desired answers, which raises the question of whether source code itself disappears as an artifact.",
+      "required_facts": [
+        "The post presents an early-stage idea.",
+        "It asks whether source code goes away once the AI creates code that delivers the desired answers."
+      ],
+      "question_type": "explanation",
+      "difficulty": "hard"
+    },
+    {
+      "case_id": "sample-q-08",
+      "distractor_source_id": "sample-21-lessons",
+      "question": "Which of these articles recommends using a Pomodoro timer during code reviews?",
+      "reference_answer": "None of the sampled articles discuss Pomodoro timers or code-review timing; the knowledge base does not contain this information.",
+      "required_facts": [],
+      "question_type": "insufficient_evidence",
+      "difficulty": "easy",
+      "no_answer": true
+    }
+  ]
+}

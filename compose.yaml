@@ -1,0 +1,238 @@
+name: knowledge-assistant
+
+x-app-environment: &app-environment
+  KNOWLEDGE_ASSISTANT_ENVIRONMENT: ${KNOWLEDGE_ASSISTANT_ENVIRONMENT:-development}
+  KNOWLEDGE_ASSISTANT_VAULT_PATH: /data/vault
+  KNOWLEDGE_ASSISTANT_DATABASE_URL: >-
+    postgresql://knowledge_assistant:${KNOWLEDGE_ASSISTANT_POSTGRES_PASSWORD:?set KNOWLEDGE_ASSISTANT_POSTGRES_PASSWORD in .env}@postgres:5432/knowledge_assistant
+  KNOWLEDGE_ASSISTANT_TELEGRAM_TOKEN: ${KNOWLEDGE_ASSISTANT_TELEGRAM_TOKEN:-}
+  KNOWLEDGE_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS: ${KNOWLEDGE_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS:-}
+  KNOWLEDGE_ASSISTANT_TELEGRAM_POLL_TIMEOUT_SECONDS: ${KNOWLEDGE_ASSISTANT_TELEGRAM_POLL_TIMEOUT_SECONDS:-25}
+  KNOWLEDGE_ASSISTANT_WORKER_POLL_SECONDS: ${KNOWLEDGE_ASSISTANT_WORKER_POLL_SECONDS:-2}
+  KNOWLEDGE_ASSISTANT_SESSION_TTL_SECONDS: ${KNOWLEDGE_ASSISTANT_SESSION_TTL_SECONDS:-3600}
+  KNOWLEDGE_ASSISTANT_RETRIEVAL_STRATEGY: ${KNOWLEDGE_ASSISTANT_RETRIEVAL_STRATEGY:-weighted-hybrid-v1}
+  KNOWLEDGE_ASSISTANT_OTEL_EXPORTER_OTLP_ENDPOINT: ${KNOWLEDGE_ASSISTANT_OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  KNOWLEDGE_ASSISTANT_GENERATION_MODEL: ${KNOWLEDGE_ASSISTANT_GENERATION_MODEL:-}
+  KNOWLEDGE_ASSISTANT_EMBEDDING_MODEL: ${KNOWLEDGE_ASSISTANT_EMBEDDING_MODEL:-}
+  KNOWLEDGE_ASSISTANT_RERANK_MODEL: ${KNOWLEDGE_ASSISTANT_RERANK_MODEL:-}
+  KNOWLEDGE_ASSISTANT_X_ARTICLE_PROVIDER: ${KNOWLEDGE_ASSISTANT_X_ARTICLE_PROVIDER:-xquik_mpp}
+  KNOWLEDGE_ASSISTANT_XQUIK_MPP_MAX_SPEND_USDC: ${KNOWLEDGE_ASSISTANT_XQUIK_MPP_MAX_SPEND_USDC:-0.001}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: runtime
+  image: knowledge-assistant:local
+  environment: *app-environment
+  init: true
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  networks:
+    - backend
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.2-pg17-bookworm
+    environment:
+      POSTGRES_DB: knowledge_assistant
+      POSTGRES_USER: knowledge_assistant
+      POSTGRES_PASSWORD: ${KNOWLEDGE_ASSISTANT_POSTGRES_PASSWORD:?set KNOWLEDGE_ASSISTANT_POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${KNOWLEDGE_ASSISTANT_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U knowledge_assistant -d knowledge_assistant
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - backend
+
+  migrate:
+    <<: *app-base
+    command:
+      - migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  bot:
+    <<: *app-base
+    command:
+      - run-bot
+    volumes:
+      - type: bind
+        source: ${KNOWLEDGE_ASSISTANT_VAULT_PATH:-./var/vault}
+        target: /data/vault
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - knowledge-assistant
+        - healthcheck
+        - bot
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  worker:
+    <<: *app-base
+    environment:
+      <<: *app-environment
+      KNOWLEDGE_ASSISTANT_XQUIK_API_KEY: ${KNOWLEDGE_ASSISTANT_XQUIK_API_KEY:-}
+    command:
+      - run-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - type: bind
+        source: ${KNOWLEDGE_ASSISTANT_VAULT_PATH:-./var/vault}
+        target: /data/vault
+      - type: volume
+        source: tempo-wallet
+        target: /home/knowledge-assistant/.tempo
+    healthcheck:
+      test:
+        - CMD
+        - knowledge-assistant
+        - healthcheck
+        - worker
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  admin:
+    <<: *app-base
+    command:
+      - check-config
+    profiles:
+      - tools
+    volumes:
+      - type: bind
+        source: ${KNOWLEDGE_ASSISTANT_VAULT_PATH:-./var/vault}
+        target: /data/vault
+      - type: bind
+        source: ./var/evaluation
+        target: /data/evaluation
+
+  tempo-auth:
+    <<: *app-base
+    entrypoint:
+      - /usr/local/bin/tempo-wallet
+    command:
+      - login
+      - --no-browser
+    profiles:
+      - tools
+    stdin_open: true
+    tty: true
+    volumes:
+      - type: volume
+        source: tempo-wallet
+        target: /home/knowledge-assistant/.tempo
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    image: knowledge-assistant:test
+    command:
+      - pytest
+      - --cov=knowledge_assistant
+      - --cov-report=term-missing
+      - -q
+    profiles:
+      - test
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    networks:
+      - backend
+
+  prefect-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: orchestration
+    image: knowledge-assistant:orchestration
+    profiles:
+      - tools
+    environment:
+      <<: *app-environment
+      HOME: /tmp
+    command:
+      - prefect-ingest
+      - --manifest
+      - /data/sample/manifest.json
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - type: bind
+        source: ./data/sample
+        target: /data/sample
+        read_only: true
+    restart: "no"
+    networks:
+      - backend
+
+  lgtm:
+    image: grafana/otel-lgtm:0.30.0
+    profiles:
+      - monitoring
+    ports:
+      - "127.0.0.1:${KNOWLEDGE_ASSISTANT_GRAFANA_PORT:-3000}:3000"
+      - "127.0.0.1:${KNOWLEDGE_ASSISTANT_OTLP_HTTP_PORT:-4318}:4318"
+    volumes:
+      - lgtm-data:/data
+      - type: bind
+        source: ./config/grafana/dashboards/knowledge-assistant.json
+        target: /otel-lgtm/grafana-dashboards/knowledge-assistant.json
+        read_only: true
+      - type: bind
+        source: ./config/grafana/provisioning/dashboards/99-knowledge-assistant.yaml
+        target: /otel-lgtm/grafana/conf/provisioning/dashboards/99-knowledge-assistant.yaml
+        read_only: true
+    restart: unless-stopped
+    networks:
+      - backend
+
+volumes:
+  postgres-data:
+  tempo-wallet:
+  lgtm-data:
+
+networks:
+  backend:
+    driver: bridge
