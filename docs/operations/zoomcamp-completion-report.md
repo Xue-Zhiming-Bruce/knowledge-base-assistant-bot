@@ -39,10 +39,10 @@ recorded by the benchmark runs; nothing is fabricated.
 
 | Check | Result |
 | --- | --- |
-| `uv run pytest` (291 tests, `PYTHONPATH=src` workaround for the local macOS .pth quirk) | 291 passed |
-| Docker hermetic test container (`docker compose --profile test run --rm test`) | 290 passed, 1 skipped (live-DB lexical test skips without a database), coverage gate satisfied (≥90%) |
+| `uv run pytest` (292 tests, `PYTHONPATH=src` workaround for the local macOS .pth quirk) | 292 passed |
+| Docker hermetic test container (`docker compose --profile test run --rm test`) | 291 passed, 1 skipped (live-DB lexical test skips without a database), coverage gate satisfied (≥90%) |
 | `uv run ruff check .` | All checks passed |
-| `uv run mypy` (93 source files, `MYPYPATH=src`) | No issues found |
+| `uv run mypy` (95 source files, `MYPYPATH=src`) | No issues found |
 | `docker compose config --quiet` | OK |
 | `uv lock --check` | Resolved 143 packages, lock current |
 | Live stack health (bot, worker, postgres, lgtm) | All Up (healthy) |
@@ -233,3 +233,30 @@ Safety verification before and after the commit:
 
 `git rev-parse HEAD` returns the latest commit; the baseline hash above plus
 any follow-up commits (such as this report appendix) form the history.
+
+## 10. Loop 2 final verification (2026-08-16)
+
+Final run with the documented reliable invocations:
+
+| Check | Result |
+| --- | --- |
+| `PYTHONPATH=src uv run --no-sync pytest` | 292 passed, 1 warning |
+| Docker hermetic `docker compose --profile test run --rm test` | 291 passed, 1 skipped, coverage gate satisfied |
+| `uv run --no-sync ruff check .` | All checks passed |
+| `MYPYPATH=src uv run --no-sync mypy` | No issues found (95 source files) |
+| `docker compose config --quiet` / `uv lock --check` | OK / Resolved 143 packages |
+| `git status --short` | clean (0 entries) |
+
+No destructive operations were performed: the four named volumes (postgres-data,
+tempo-wallet, lgtm-data, plus the project network) are intact, `docker compose
+down --volumes` was never run, and the canonical vault Markdown (19 articles in
+the worker's `/data/vault/Articles/substack/`) is untouched. The completion
+report now reflects: corrected lexical retrieval results (section 2),
+answer-evaluation validation mode (sections 1 and 3, routing in
+`application/evaluation_targets.py`), precise abstention metric definitions
+(sections 1 and 3 and `data/sample/answer-benchmark-summary.md`), Grafana
+dashboard load evidence (`docs/assets/grafana-dashboard-verification.md`),
+the copyright review of public artifacts (section 1), and the Git baseline
+commit hash `95713058bc701945666dac1729a28ba576923507` (section 9; HEAD
+`676e720dde6e8bce8fb09dcf1fcb57f71dd1a756`). External tasks remain listed
+separately in section 8.
