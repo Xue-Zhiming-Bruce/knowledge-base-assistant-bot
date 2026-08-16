@@ -207,3 +207,29 @@ Tests: `tests/test_evaluation.py`, `tests/test_synthetic_v2.py`,
 - Complete the three required peer reviews.
 - Update the certificate name on the platform enrollment page.
 - Obtain organizer approval if the submission deadline has passed.
+
+## 9. Git baseline (Loop 2)
+
+A Git repository was initialized in the working tree on 2026-08-16 and the
+corrected tree was captured in the baseline commit:
+
+- **Commit hash:** `95713058bc701945666dac1729a28ba576923507`
+- Files committed: 153 (source, tests, docs, `data/sample/`, `config/grafana/`,
+  `compose.yaml`, `Dockerfile`, `pyproject.toml`, `uv.lock`, `.env.example`,
+  `.gitignore`, `.dockerignore`, `AGENTS.md`, `README.md`, `requirements.md`)
+
+Safety verification before and after the commit:
+
+- `git status --short` is clean after the baseline commit (no unintended files).
+- `git ls-files` contains no `.env`, `var/`, `*.log`, `.DS_Store`, or
+  `__pycache__` paths; the only `.env*` file tracked is the placeholder
+  `.env.example`.
+- `git grep` across tracked files finds no real secret values (env-var names in
+  code like `environ.get("OPENAI_API_KEY")` are references, not values; docs
+  contain no `KEY=<value>` assignments or private keys).
+- `.vscode/` was added to `.gitignore` (personal editor config, consistent with
+  `.idea/`); the private Obsidian vault lives outside the repository and `var/`
+  (vault copies, evaluation results, granite-* artifacts) remains ignored.
+
+`git rev-parse HEAD` returns the latest commit; the baseline hash above plus
+any follow-up commits (such as this report appendix) form the history.
