@@ -1,0 +1,336 @@
+{
+  "manifest_version": "sample-corpus-v1",
+  "dataset_version": "sample-docs-v1",
+  "description": "Public-safe sample corpus of four public Substack essays about software engineering craft, careers, and AI-assisted development. The manifest records only titles, URLs, provenance, and curated evaluation questions with concise reference answers and required facts written in original wording. Question-generator provenance was not recorded. No article bodies or excerpts are included.",
+  "sources": [
+    {
+      "source_id": "sample-21-lessons",
+      "title": "21 Lessons from 14 Years at Google",
+      "url": "https://addyo.substack.com/p/21-lessons-from-14-years-at-google",
+      "provider": "substack",
+      "provenance": "Public Substack essay by Addy Osmani; verified publicly fetchable 2026-08. Only title and URL recorded here."
+    },
+    {
+      "source_id": "sample-software-factories",
+      "title": "Software Factories, Light and Dark",
+      "url": "https://addyo.substack.com/p/software-factories-light-and-dark",
+      "provider": "substack",
+      "provenance": "Public Substack essay by Addy Osmani; verified publicly fetchable 2026-08. Only title and URL recorded here."
+    },
+    {
+      "source_id": "sample-source-code",
+      "title": "Is Source Code Going Away?",
+      "url": "https://tidyfirst.substack.com/p/is-source-code-going-away",
+      "provider": "substack",
+      "provenance": "Public Substack post by Kent Beck; verified publicly fetchable 2026-08. Only title and URL recorded here."
+    },
+    {
+      "source_id": "sample-pinhole",
+      "title": "The Pinhole View of AI Value",
+      "url": "https://tidyfirst.substack.com/p/the-pinhole-view-of-ai-value",
+      "provider": "substack",
+      "provenance": "Public Substack essay by Kent Beck; verified publicly fetchable 2026-08. Only title and URL recorded here."
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "sample-q-01",
+      "source_id": "sample-21-lessons",
+      "question": "I've been at my company for years and keep hearing that being a great coder isn't enough. What do engineers actually need to get good at?",
+      "reference_answer": "The essay argues that thriving as an engineer is not the same as being the best programmer: it depends on handling the human and organizational context around the code (people, politics, alignment, ambiguity) and on staying deeply focused on understanding user problems rather than on technology alone.",
+      "required_facts": [
+        "Engineers who thrive manage the human and organizational context around code (people, politics, alignment, ambiguity) rather than only writing great code.",
+        "The author recommends becoming obsessed with understanding user problems and letting solutions emerge."
+      ],
+      "question_type": "fact",
+      "difficulty": "easy"
+    },
+    {
+      "case_id": "sample-q-02",
+      "source_id": "sample-21-lessons",
+      "question": "My team is stuck debating the perfect architecture for something we haven't built yet. What would the essay advise?",
+      "reference_answer": "The essay warns that aiming for a perfect design before anything exists is paralyzing; the right design emerges from real-world use, not from thinking alone. Its advice is to iterate from a rough first attempt to a correct, refined version: get an early prototype in front of users and learn from their feedback.",
+      "required_facts": [
+        "The quest for perfection is paralyzing.",
+        "The article advises iterating from a rough first attempt to a correct, refined version."
+      ],
+      "question_type": "explanation",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-03",
+      "source_id": "sample-software-factories",
+      "question": "A colleague described our new agent setup as a 'software factory'. What's the difference between a loop, a harness, and a factory in that framing?",
+      "reference_answer": "A loop is one agent doing a single job on repeat: gather context, take an action, check the result, and go again until some condition is met. A harness is the environment around a loop: the sandbox it runs in, the tools it can reach, the memory that survives between runs, and the gates that decide what done means. A software factory is many harnessed loops running at once, fed by a queue of work whose output passes a review gate before production.",
+      "required_facts": [
+        "A loop is one agent doing a single job on repeat.",
+        "A harness is the sandbox, tools, memory, and gates around a loop.",
+        "A software factory is many harnessed loops fed by a queue whose output passes a review gate."
+      ],
+      "question_type": "explanation",
+      "difficulty": "hard"
+    },
+    {
+      "case_id": "sample-q-04",
+      "source_id": "sample-software-factories",
+      "question": "The article talks about light and dark factories. What is the trade-off it describes between keeping humans in the loop and not?",
+      "reference_answer": "A light factory runs the loop with humans in it, trading judgment and concentration against speed and breakage. A dark factory ignores the humans and lets agents scope, build, and ship code without anyone really reading the details. The risk the article highlights is that when people no longer read the software's output, they lose their understanding of it.",
+      "required_facts": [
+        "A light factory runs the loop with humans in it.",
+        "A dark factory lets agents scope, build, and ship without people reading the details.",
+        "When people no longer read the software's output, they lose their understanding of it."
+      ],
+      "question_type": "comparison",
+      "difficulty": "hard"
+    },
+    {
+      "case_id": "sample-q-05",
+      "source_id": "sample-pinhole",
+      "question": "My leadership keeps evaluating AI purely by how many people we can cut. Is that the right lens?",
+      "reference_answer": "The essay argues that focusing only on headcount reduction is like saying the only value of a car is that you don't have to pay for a horse. Labor replacement looks at value creation through a tiny pinhole: cost reduction is one way AI creates value, but it is not the only way and not necessarily the most important one.",
+      "required_facts": [
+        "Labor replacement looks at value creation through a tiny pinhole.",
+        "Cost reduction is one way AI creates value, but not the only way."
+      ],
+      "question_type": "explanation",
+      "difficulty": "easy"
+    },
+    {
+      "case_id": "sample-q-06",
+      "source_id": "sample-pinhole",
+      "question": "What analogy does the essay use to argue that headcount reduction is a narrow view of AI's value?",
+      "reference_answer": "It compares focusing only on headcount reduction to saying the only value of a car is that you don't have to pay for a horse.",
+      "required_facts": [
+        "The essay compares headcount-only thinking to saying the only value of a car is not paying for a horse."
+      ],
+      "question_type": "exact_lookup",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-07",
+      "source_id": "sample-source-code",
+      "question": "Kent Beck shared an early idea about source code going away. What is the gist of the post?",
+      "reference_answer": "The post is an early-stage idea: developers who work with AI ('Augmented Developers') are pushing the model to produce code that, once run, yields the desired answers, which raises the question of whether source code itself disappears as an artifact.",
+      "required_facts": [
+        "The post presents an early-stage idea.",
+        "It asks whether source code goes away once the AI creates code that delivers the desired answers."
+      ],
+      "question_type": "explanation",
+      "difficulty": "hard"
+    },
+    {
+      "case_id": "sample-q-08",
+      "distractor_source_id": "sample-21-lessons",
+      "question": "Which of these articles recommends using a Pomodoro timer during code reviews?",
+      "reference_answer": "None of the sampled articles discuss Pomodoro timers or code-review timing; the knowledge base does not contain this information.",
+      "required_facts": [],
+      "question_type": "insufficient_evidence",
+      "difficulty": "easy",
+      "no_answer": true
+    },
+    {
+      "case_id": "sample-q-09",
+      "source_id": "sample-21-lessons",
+      "question": "The essay says your code outlives you on the team. What does it call your code for the people who maintain it later?",
+      "reference_answer": "It calls your code 'a strategy memo to strangers' - written for the engineers who will maintain it during a 2am outage - so clarity matters more than cleverness.",
+      "required_facts": [
+        "The essay describes code as a strategy memo to strangers who will maintain it.",
+        "It argues clarity is operational risk reduction, not a style preference."
+      ],
+      "question_type": "exact_lookup",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-10",
+      "source_id": "sample-21-lessons",
+      "question": "My team loves adopting the newest framework for every project. What does the essay suggest about how to treat non-standard technology choices?",
+      "reference_answer": "It suggests treating technology choices like a small 'innovation token' budget: spend one token each time you adopt something materially non-standard, because you can't afford many. Innovate only where you are uniquely paid to innovate, and default to boring elsewhere, because boring has known failure modes.",
+      "required_facts": [
+        "Treat technology choices like a small innovation token budget.",
+        "Innovate only where you are uniquely paid to innovate and default to boring elsewhere."
+      ],
+      "question_type": "explanation",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-11",
+      "source_id": "sample-21-lessons",
+      "question": "Earlier you said a great coder isn't enough. But is writing code itself still important in this view?",
+      "reference_answer": "Yes - but the essay reframes what good code means: code is a strategy memo for the humans who maintain it, and the senior engineers it admires trade cleverness for clarity every time. It also notes that writing things down forces clarity, so explaining your code to others reveals gaps in your own understanding.",
+      "required_facts": [
+        "The essay reframes good code as clarity for future maintainers.",
+        "Writing and explaining forces clarity and reveals gaps in understanding."
+      ],
+      "question_type": "follow_up",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-12",
+      "source_id": "sample-software-factories",
+      "question": "When did the term 'software factory' first appear, according to the article?",
+      "reference_answer": "The article traces the term to Bob Bemer's 1968 paper 'The economics of program production', which proposed software as a repeatable, instrumentable production process rather than the isolated craft of individuals.",
+      "required_facts": [
+        "The term software factory dates to Bob Bemer's 1968 paper.",
+        "The 1968 paper described software as a repeatable production process rather than isolated craft."
+      ],
+      "question_type": "exact_lookup",
+      "difficulty": "easy"
+    },
+    {
+      "case_id": "sample-q-13",
+      "source_id": "sample-software-factories",
+      "question": "What does 'comprehension debt' mean in the article, and why does a dark factory make it worse?",
+      "reference_answer": "Comprehension debt is the widening gap between how much code exists and how much any human still understands. A dark factory ships code that no human has read, so it does not pay the debt down - it takes it on as fast as it can, with the tests staying green the whole way, and the reckoning is quiet and late.",
+      "required_facts": [
+        "Comprehension debt is the gap between code that exists and what humans still understand.",
+        "A dark factory does not pay the debt down; it accumulates it while tests stay green."
+      ],
+      "question_type": "explanation",
+      "difficulty": "hard"
+    },
+    {
+      "case_id": "sample-q-14",
+      "source_id": "sample-software-factories",
+      "question": "The article says verification is the real constraint on a factory. What does 'back pressure' mean in that context?",
+      "reference_answer": "'Back pressure' is the rule that you can only hand a loop as much autonomy as you can cheaply and reliably verify, and not one inch more. Because generation is cheap and unbounded while human review is finite, the verification neck of the funnel backs up, and autonomy cannot expand beyond what can be verified.",
+      "required_facts": [
+        "Back pressure limits autonomy to what can be cheaply and reliably verified.",
+        "Generation is unbounded while human verification is the finite bottleneck."
+      ],
+      "question_type": "explanation",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-15",
+      "source_id": "sample-software-factories",
+      "question": "The article cites a rule of thumb about how long a single agent loop can stay effective. What is it?",
+      "reference_answer": "Dex's rule of thumb: an agent holds up for three to ten steps, then starts losing the thread past twenty, because of context accumulation; short loops are cheaper to verify than long sprawling ones.",
+      "required_facts": [
+        "An agent holds up for three to ten steps and loses the thread past twenty.",
+        "Short loops are easier to verify than long sprawling ones."
+      ],
+      "question_type": "hard_negative",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-16",
+      "source_id": "sample-pinhole",
+      "question": "What four levers does the essay list for increasing a company's value?",
+      "reference_answer": "Under the naive view that company value equals net present value, the four levers are: smaller costs at the same time, same costs but later, more revenue at the same time, and same revenue but sooner.",
+      "required_facts": [
+        "Smaller costs at the same time; same costs but later.",
+        "More revenue at the same time; same revenue but sooner."
+      ],
+      "question_type": "exact_lookup",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-17",
+      "source_id": "sample-pinhole",
+      "question": "Beyond the four cash-flow levers, what does the essay say also contributes to a company's value?",
+      "reference_answer": "It says company value also encodes optionality - how many ways exist to improve net present value in the future - and that flexibility has value, especially in an environment being transformed by AI; a company with more options is worth more than one with the same cash flows but fewer options.",
+      "required_facts": [
+        "Company value also encodes optionality.",
+        "Flexibility has value, especially under AI-driven uncertainty."
+      ],
+      "question_type": "explanation",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-18",
+      "source_id": "sample-pinhole",
+      "question": "How does the essay's view of AI value creation differ from the 20VC labor-replacement thesis it criticizes?",
+      "reference_answer": "The 20VC thesis claims AI profitability runs through labor replacement: stop paying a million dollars in salaries by paying a hundred thousand for an AI service. The essay argues that is a tiny pinhole: it focuses only on the smaller-costs lever and ignores more revenue, sooner revenue, delayed costs, and new options. The real question is what people can do now that they could not do before.",
+      "required_facts": [
+        "The 20VC thesis focuses only on labor replacement.",
+        "The essay argues value also comes from revenue, timing, and new options."
+      ],
+      "question_type": "comparison",
+      "difficulty": "hard"
+    },
+    {
+      "case_id": "sample-q-19",
+      "source_id": "sample-software-factories",
+      "question": "Both Osmani essays seem to say human attention is the scarce resource in AI-assisted software work. Do they agree?",
+      "reference_answer": "Yes. 'Software Factories, Light and Dark' argues the review gate is the one box that resists scaling because it is human judgment, and a lit factory keeps human attention wherever a wrong call is expensive; '21 Lessons' argues your code is written for humans who must maintain and understand it, and that every metric gets gamed without human interpretation. Together they frame human comprehension and judgment as the bottleneck automation cannot remove.",
+      "required_facts": [
+        "Software Factories treats the human review gate as the non-scaling bottleneck.",
+        "21 Lessons treats human comprehension of code as the point of code quality.",
+        "Both frame human judgment and comprehension as the scarce resource."
+      ],
+      "question_type": "synthesis",
+      "difficulty": "hard"
+    },
+    {
+      "case_id": "sample-q-20",
+      "source_id": "sample-pinhole",
+      "question": "Kent Beck's two essays - the one about source code going away and the pinhole view of AI value - seem to make a similar point about AI. What is it?",
+      "reference_answer": "Both reframe AI's value from doing the current work to enabling something new. The source-code essay floats the idea that developers get the AI to create code that, once run, yields the desired answers, so the code artifact itself may fade; the pinhole essay says the question is what people can now do that they could not do before. In both, value shifts from the artifact to the outcome.",
+      "required_facts": [
+        "The source-code essay questions whether the code artifact remains central.",
+        "The pinhole essay says the question is what people can now do that they could not do before.",
+        "Both shift value from the artifact to the outcome."
+      ],
+      "question_type": "synthesis",
+      "difficulty": "hard"
+    },
+    {
+      "case_id": "sample-q-21",
+      "source_id": "sample-21-lessons",
+      "question": "OK, so I shouldn't just write more code. What does the essay say about deleting code?",
+      "reference_answer": "It argues deletion is underappreciated: nobody gets promoted for deleting code even though deletion often improves a system more than addition, and every line you don't write is a line you never have to debug, maintain, or explain. Before you build, ask what would happen if you just didn't.",
+      "required_facts": [
+        "Deletion often improves a system more than addition.",
+        "Before building, ask what would happen if you did not build it."
+      ],
+      "question_type": "follow_up",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-22",
+      "source_id": "sample-pinhole",
+      "question": "So cost-cutting isn't the only value. Can you give me a concrete example from the essay where AI creates value without cutting headcount?",
+      "reference_answer": "One example is expanded service capacity: a support team of ten can handle the inquiry volume that used to require twenty-five people, and instead of firing fifteen people the company serves three times as many customers, with humans handling the hard cases and AI the routine ones.",
+      "required_facts": [
+        "Expanded service capacity: ten people handle what used to take twenty-five.",
+        "The company serves more customers instead of firing people."
+      ],
+      "question_type": "follow_up",
+      "difficulty": "medium"
+    },
+    {
+      "case_id": "sample-q-23",
+      "source_id": null,
+      "distractor_source_id": "sample-21-lessons",
+      "question": "Which of the saved articles recommends a specific daily meditation or mindfulness routine for engineers?",
+      "reference_answer": "None of the saved articles recommend a meditation or mindfulness routine; the knowledge base does not contain this information.",
+      "required_facts": [],
+      "question_type": "insufficient_evidence",
+      "difficulty": "medium",
+      "no_answer": true
+    },
+    {
+      "case_id": "sample-q-24",
+      "source_id": null,
+      "distractor_source_id": "sample-software-factories",
+      "question": "Which saved article includes a step-by-step tutorial for configuring GitHub Actions?",
+      "reference_answer": "None of the saved articles include a GitHub Actions tutorial. 'Software Factories, Light and Dark' only mentions a nightly cron that opens one small pull request as an example of a low-risk automated loop, not as instructions.",
+      "required_facts": [],
+      "question_type": "insufficient_evidence",
+      "difficulty": "hard",
+      "no_answer": true
+    },
+    {
+      "case_id": "sample-q-25",
+      "source_id": "sample-21-lessons",
+      "question": "When a system gets slow, what does the essay say is usually more impactful than optimizing the slow parts?",
+      "reference_answer": "It says more performance wins come from asking what you are computing that you do not need: deleting unnecessary work is almost always more impactful than doing necessary work faster, because the fastest code is code that never runs.",
+      "required_facts": [
+        "Deleting unnecessary work beats making necessary work faster.",
+        "The fastest code is code that never runs."
+      ],
+      "question_type": "hard_negative",
+      "difficulty": "medium"
+    }
+  ]
+}
