@@ -21,10 +21,10 @@ knowledge-assistant.venv/
 
 # IDE and operating system
 .DS_Store
+*.png
 .idea/
 .vscode/
 
 # Local runtime data
 var/
 *.log
-
