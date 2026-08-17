@@ -56,6 +56,7 @@ def test_initial_migration_contains_operational_and_rag_schema() -> None:
         "0005_learned_sparse_embeddings",
         "0006_remove_learned_sparse_embeddings",
         "0007_answer_feedback",
+        "0008_feedback_durable",
     ]
     sql = migrations[0].sql
     for required_fragment in (
@@ -72,6 +73,12 @@ def test_initial_migration_contains_operational_and_rag_schema() -> None:
     assert re.fullmatch(r"[a-f0-9]{64}", migrations[0].checksum)
     assert "ADD COLUMN sparse_embedding sparsevec" in migrations[4].sql
     assert "DROP COLUMN IF EXISTS sparse_embedding" in migrations[5].sql
+    # 0008 must be forward-only: it decouples feedback from temporary sessions by
+    # dropping the cascading foreign keys (feedback survives /end and expiry).
+    assert "DROP CONSTRAINT answer_feedback_session_id_fkey" in migrations[7].sql
+    assert "DROP CONSTRAINT answer_feedback_turn_fk" in migrations[7].sql
+    assert "CREATE TABLE" not in migrations[7].sql
+    assert "DROP TABLE" not in migrations[7].sql
 
 
 def test_migration_runner_applies_pending_migration(
@@ -93,6 +100,7 @@ def test_migration_runner_applies_pending_migration(
         "0005_learned_sparse_embeddings",
         "0006_remove_learned_sparse_embeddings",
         "0007_answer_feedback",
+        "0008_feedback_durable",
     )
     assert any("pg_advisory_xact_lock" in statement for statement in connection.statements)
     assert any("CREATE TABLE documents" in statement for statement in connection.statements)

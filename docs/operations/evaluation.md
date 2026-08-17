@@ -156,10 +156,12 @@ been ingested.
 ## Public sample corpus and document-level evaluation
 
 The committed `data/sample/manifest.json` provides a public-safe, reproducible corpus:
-four public Substack essays (titles and URLs only, no bodies) plus eight
-human-authored questions with reference answers and required facts, including one
-insufficient-evidence case. Ingest it, build the document-level dataset, and run the
-full benchmark:
+four public Substack essays (titles and URLs only, no bodies) plus **25
+curated questions** with reference answers and required facts — including
+two multi-document synthesis, three follow-up-style, two hard-negative, and
+**three insufficient-evidence cases** (no-answer cases are excluded from Hit@K
+and MRR and reported through explicit abstention and false-positive metrics).
+Ingest it, build the document-level dataset, and run the full benchmark:
 
 ```shell
 docker compose --profile tools run --rm admin \
@@ -200,10 +202,12 @@ The answer runner exercises the real RAG path for every case: question, retrieva
 reranking, bounded context assembly, structured answer generation, deterministic
 citation validation, and answer evaluation. It compares two answer approaches:
 
-- `grounded-answer-v1` — the production baseline prompt with a 16,000-character
+- `grounded-answer-v1` — the explicit baseline override with a 16,000-character
   context budget (2,400 per item);
-- `grounded-answer-v2` — a stricter policy: per-sentence citation markers, explicit
-  abstention language, and a tighter 12,000-character context budget (1,600 per item).
+- `grounded-answer-v2` — the production default (validated setting
+  `KNOWLEDGE_ASSISTANT_ANSWER_PROMPT_VERSION`, used by Telegram Question Mode
+  and `demo ask`): stricter per-sentence citation markers, explicit abstention
+  language, and a tighter 12,000-character context budget (1,600 per item).
 
 Run both approaches against a frozen dataset:
 
@@ -221,6 +225,33 @@ docker compose --profile tools run --rm admin \
 under a fixed versioned rubric (`answer-judge-rubric-v1`). Judge input is bounded
 (question, answer, reference answer, required facts, and the supporting excerpt are
 truncated) and the judge model and prompt versions are stored with every result.
+
+`answer-eval-run` always compares `grounded-answer-v1` and `grounded-answer-v2`
+regardless of the configured production default; the configured version affects
+only Telegram Question Mode and `demo ask`.
+
+**Judge calibration against human labels.** Judge scores are model opinions, not
+ground truth. Reviewed human labels belong in
+`data/sample/answer-human-labels.jsonl` (schema in
+[data/sample/README.md](../../data/sample/README.md)); the file is committed empty
+until a human scores a subset. Once labels exist, compare them against the real
+judge scores:
+
+```shell
+docker compose --profile tools run --rm admin \
+  answer-eval-calibrate \
+  --results /data/evaluation/answer-results.jsonl \
+  --human-labels /data/sample/answer-human-labels.jsonl \
+  --output-markdown /data/evaluation/judge-calibration.md
+```
+
+It reports per-dimension mean absolute error, bias (judge minus human), and
+Pearson correlation on the matched `(case, approach)` subset. With no human
+labels it reports `{"status": "not_run", ...}`: calibration is `not_run` and
+every judge score remains an uncalibrated model opinion. Deterministic metrics,
+human labels, model-judge scores, and uncalibrated opinions are kept strictly
+separate in the committed summaries; lexical coverage is explicitly a proxy,
+never semantic factual correctness.
 
 Deterministic checks recorded per (case, approach) without any LLM:
 
@@ -283,8 +314,7 @@ docker compose --profile tools run --rm admin \
 
 Activation retires the previous active generation in the same database transaction.
 Keep `KNOWLEDGE_ASSISTANT_RETRIEVAL_STRATEGY=weighted-hybrid-v1` until the paired
-evaluation supports a strategy change. Configuring the sparse model does not by
-itself switch live retrieval.
+evaluation supports a strategy change.
 
 The retired rows are retained, but an operator-facing rollback command and automated
 evaluation gate are not implemented yet. Do not delete a retired generation until a

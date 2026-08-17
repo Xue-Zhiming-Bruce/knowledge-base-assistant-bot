@@ -1,13 +1,15 @@
 # Retrieval Benchmark Summary — sample-docs-v1
 
-Dataset: `sample-docs-v1` (8 human-authored document-level cases from
-`data/sample/manifest.json`, 4 public Substack sources)
+Dataset: `sample-docs-v1` (25 curated document-level cases from
+`data/sample/manifest.json` — 22 answerable, 3 insufficient-evidence; 4 public
+Substack sources)
 Projection: `bd3a3ba7-f427-42f0-91d4-0f0f5f0d3465` (active, `text-embedding-3-small`,
 1536 dims, chunker `markdown-paragraphs-v1`)
 Embedding model: `text-embedding-3-small`; planner model: the configured
 generation model; reranker: deterministic diversity reranker.
 
-Run command:
+Run command (real rerun, 2026-08-17, after expanding the dataset from 8 to 25
+curated questions):
 
 ```shell
 knowledge-assistant eval-run \
@@ -39,61 +41,105 @@ most relevant chunks rise to the top. A regression test
 "headcount reduction … AI's value" question retrieves the expected *Pinhole View
 of AI Value* document lexically.
 
-## Strategy comparison (after the fix)
+## Strategy comparison (2026-08-17 rerun, 25 cases)
+
+No-answer cases are excluded from Hit@K and MRR; they are reported through the
+no-answer false-positive rate (fraction of the 3 insufficient-evidence cases
+where retrieval surfaced the distractor document with overlapping terminology).
 
 | Strategy | Hit@5 | Hit@20 | MRR | Mean latency | Planner calls | No-answer false-positive |
 | --- | --- | --- | --- | --- | --- | --- |
-| vector-only-v1 | 1.000 | 1.000 | 0.893 | 0.99s | 0.0 | 0.000 |
-| lexical-only-v1 | 0.857 | 1.000 | 0.673 | 0.54s | 0.0 | 1.000 |
-| weighted-hybrid-v1 (default) | 1.000 | 1.000 | 0.929 | 0.60s | 0.0 | 1.000 |
-| rrf-hybrid-v1 | 1.000 | 1.000 | 0.929 | 0.53s | 0.0 | 0.000 |
-| agentic-decomposition-v1 | 1.000 | 1.000 | 0.929 | 2.93s | 1.0 | 0.000 |
+| vector-only-v1 | 1.000 | 1.000 | 0.871 | 0.61s | 0.0 | 0.333 |
+| lexical-only-v1 | 0.773 | 0.909 | 0.656 | 0.48s | 0.0 | 0.667 |
+| weighted-hybrid-v1 (default) | 0.909 | 1.000 | 0.814 | 0.47s | 0.0 | 0.667 |
+| rrf-hybrid-v1 | 0.909 | 1.000 | 0.848 | 0.45s | 0.0 | 0.333 |
+| agentic-decomposition-v1 | 0.955 | 1.000 | 0.873 | 2.45s | 1.0 | 0.333 |
 
 Notes:
 
-- `lexical-only-v1` improved from 0.000 to 0.857 Hit@5 / 0.673 MRR; the hybrid
-  strategies' MRR improved from 0.893 to 0.929, reflecting a live lexical leg.
-- The no-answer (insufficient-evidence) case stays **excluded from Hit@K and MRR
-  aggregates**; it is reported through `no_answer_false_positive_rate` instead.
-  Under OR semantics the no-answer question now surfaces plausible distractor
-  chunks for `lexical-only-v1` and `weighted-hybrid-v1` (false-positive 1.000):
-  the retrieval layer flags them, and the answer layer must abstain — which
-  `grounded-answer-v2` does (100% abstention in the end-to-end run), while
-  `grounded-answer-v1` does not (0% abstention). RRF and agentic keep the
-  distractor below the evidence cutoff (0.000).
+- The expanded 25-case set (including synthesis, follow-up, and hard-negative
+  questions with overlapping terminology) is more demanding than the original 8
+  cases: absolute scores dropped slightly across strategies, and `lexical-only-v1`
+  Hit@5 fell to 0.773, showing the paraphrase gap on the harder mix.
+- `vector-only-v1` has the best Hit@5 (1.000) and a higher MRR (0.871) than
+  `rrf-hybrid-v1` (0.848) and `weighted-hybrid-v1` (0.814); only
+  `agentic-decomposition-v1` edges its MRR (0.873), at roughly 5x the latency.
+- No-answer false-positive rates are now non-zero for several strategies (the
+  hard-negative no-answer cases retrieve their distractor document): the answer
+  layer must abstain on them — `grounded-answer-v2` abstains on 2 of 3 in the
+  end-to-end run while `grounded-answer-v1` abstains on 0 (see
+  [answer-benchmark-summary.md](./answer-benchmark-summary.md)).
 
 ## Breakdowns (weighted-hybrid-v1)
 
-By question type: fact 1/1, explanation 4/4, comparison 1/1, exact_lookup 1/1
-(Hit@5); insufficient_evidence abstains via the answer layer.
-By difficulty: easy 3/3, medium 2/2, hard 3/3 (Hit@5).
+By question type (Hit@5 / cases): fact 1/1, explanation 7/8, comparison 2/2,
+exact_lookup 4/4, synthesis 1/2, follow_up 3/3, hard_negative 2/2;
+insufficient_evidence 3/3 abstain via the answer layer (excluded from Hit@K).
+By difficulty (Hit@5 / cases): easy 3/3, medium 11/12, hard 6/7.
 
 ## Selection policy outcome
 
 Applied the pre-registered
-[retrieval selection policy](../../docs/operations/retrieval-selection-policy.md):
+[retrieval selection policy](../../docs/operations/retrieval-selection-policy.md)
+to every candidate on the same 25-case dataset and projection. Gate-by-gate
+against the default `weighted-hybrid-v1` (Hit@5 0.909, MRR 0.814, 0.47s):
 
-- Quality gate (Hit@5 **and** MRR at least 0.02 above the default): no candidate
-  beats `weighted-hybrid-v1` (rrf and agentic tie its MRR; vector-only is lower).
-- Latency gate (≤ 1.5x the default): `agentic-decomposition-v1` fails at 2.93s
-  vs 0.60s (≈4.9x).
-- Cost gate: agentic adds one planner call and ~219 input tokens per question
-  without a quality gain.
-- Operational complexity: agentic adds a planner failure surface without benefit.
+**G1 Quality (Hit@5 and MRR both at least +0.02 on the aggregate, with no
+per-slice regression worse than 0.01 on fact/exact_lookup/easy):**
 
-**Decision: no change.** `weighted-hybrid-v1` remains the production default.
-The lexical fix strengthened the hybrid's lexical leg (MRR 0.893 → 0.929) rather
-than favoring any candidate.
+- `vector-only-v1` (1.000 / 0.871): clears the aggregate requirement (+0.091
+  Hit@5, +0.057 MRR) and the fact and easy slices show no regression
+  (fact 1.000/1.000 in both; easy 1.000/1.000 vs 1.000/0.833 — an improvement).
+  It **fails the gate on the exact_lookup slice**: MRR drops from 1.000 to
+  0.833 (a −0.167 regression, far beyond the 0.01 tolerance), driven by
+  `sample-q-09` (the "strategy memo" question): vector-only ranks the target
+  document's chunk at position 3 (rr 0.333) while the hybrid ranks it first
+  (rr 1.000). The exact_lookup slice has only 4 cases, but the pre-registered
+  rule is decisive on this evidence.
+- `rrf-hybrid-v1` (0.909 / 0.848): fails the aggregate requirement — Hit@5 ties
+  the default (0.909), not +0.02, despite an MRR gain of +0.034.
+- `agentic-decomposition-v1` (0.955 / 0.873): clears the aggregate requirement
+  (+0.046 / +0.059) but is evaluated below under the latency and cost gates.
+- `lexical-only-v1` (0.773 / 0.656): fails the aggregate requirement.
+
+**G2 Latency (≤ 1.5x the default):** `vector-only-v1` passes at 0.614s vs
+0.469s (≈1.31x). `agentic-decomposition-v1` fails at 2.45s (≈5.2x).
+
+**G3 Cost (planner calls and tokens within the default's budget):**
+`vector-only-v1` passes — 0 planner calls and 0 planner tokens, same as the
+hybrid. `agentic-decomposition-v1` adds one planner call and ~219 input tokens
+per question without a quality gain that clears the other gates.
+
+**G4 Operational complexity:** `vector-only-v1` adds no unrecoverable state, no
+new external service, and stays within the existing projection contract (it is
+simply the semantic leg of the same chunks). `agentic-decomposition-v1` adds a
+planner failure surface.
+
+**No-answer false-positive behavior (reported, not a gate):** `vector-only-v1`
+is better than the default (0.333 vs 0.667 of the 3 insufficient-evidence cases
+surfacing their distractor document), so this does not block it.
+
+**Decision: no change.** `weighted-hybrid-v1` remains the production default:
+no candidate satisfies all four preregistered gates. `vector-only-v1` is the
+closest — it clears aggregate quality, latency, cost, operational complexity,
+and no-answer false positives — but it fails the pre-registered per-slice
+regression gate on exact_lookup MRR (0.833 vs 1.000, −0.167, driven by
+`sample-q-09` ranking position 3 vs 1). `rrf-hybrid-v1` and
+`agentic-decomposition-v1` fail the Hit@5 aggregate requirement and the latency
+gate respectively; `lexical-only-v1` fails aggregate quality. A future
+switch would require a reviewed dataset and rerun on which the exact_lookup
+slice does not regress.
 
 ## Honest caveats
 
-- The sample is 8 cases over 4 documents; scores are indicative, not
-  statistically significant.
+- The sample is 25 cases over 4 documents; scores are indicative, not
+  statistically significant, but the dataset is now large enough to show
+  strategy separation on a harder mix.
 - The no-answer false-positive behavior differs by strategy under OR semantics;
   the correct end-to-end test is answer-layer abstention (see
   [answer-benchmark-summary.md](./answer-benchmark-summary.md)).
 - `synthetic-chunks-v1` results (if present in `var/evaluation/`) are **biased
   and superseded**: v1 generated each question from its own target chunk,
   inflating lexical overlap and scores. They are not natural-user evidence.
-- All numbers above are real output from the recorded run; nothing was
+- All numbers above are real output from the recorded rerun; nothing was
   fabricated.

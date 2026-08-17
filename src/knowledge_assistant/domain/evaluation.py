@@ -506,7 +506,7 @@ class SampleSource:
 
 @dataclass(frozen=True, slots=True)
 class SampleCase:
-    """Public-safe human-authored evaluation question mapped to a sample source."""
+    """Public-safe curated evaluation question mapped to a sample source."""
 
     case_id: str
     source_id: str | None

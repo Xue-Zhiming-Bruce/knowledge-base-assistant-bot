@@ -402,6 +402,7 @@ def make_worker(
     fetcher: FakeFetcher | None = None,
     extractor: object | None = None,
     image_fetcher: object | None = None,
+    telegram: object | None = None,
 ) -> IngestionWorker:
     return IngestionWorker(
         repository=cast(Any, repository),
@@ -418,7 +419,7 @@ def make_worker(
         vault=FileSystemVaultRepository(tmp_path / "vault"),
         chunker=MarkdownChunker(),
         embeddings=FakeEmbeddings(),
-        telegram=cast(Any, FakeTelegram()),
+        telegram=cast(Any, telegram),
         poll_seconds=0.01,
     )
 
@@ -478,6 +479,24 @@ def test_worker_loop_heartbeats_and_stops(tmp_path: Path) -> None:
     assert repository.heartbeats == 1
 
 
+def test_worker_runs_and_dispatches_without_telegram_client(tmp_path: Path) -> None:
+    repository = FakeWorkerRepository()
+    worker = make_worker(tmp_path, repository)
+
+    # Notification-free: the full pipeline (fetch, extract, vault commit,
+    # chunk, embed, index, ready) must complete with no Telegram client, and
+    # dispatch must be a safe no-op that never claims or fabricates recipients.
+    worker.process_job(claimed_job())
+    worker.dispatch_notifications()
+
+    assert repository.registered
+    assert repository.stored
+    assert repository.ready
+    assert repository.delivered == []
+    assert repository.deferred == []
+    assert next((tmp_path / "vault").rglob("*.md")).is_file()
+
+
 def test_worker_delivers_and_defers_notifications(tmp_path: Path) -> None:
     repository = FakeWorkerRepository()
     notification_id = uuid.uuid4()
@@ -505,3 +524,37 @@ def test_worker_notifies_on_terminal_failure(tmp_path: Path) -> None:
     worker.process_job(claimed_job())
 
     assert "couldn't save" in telegram.sent[0][1]
+
+
+def test_worker_failure_notification_delivery_error_is_logged_not_fatal(
+    tmp_path: Path,
+) -> None:
+    repository = FakeWorkerRepository()
+    repository.terminal_state = IngestionState.FAILED
+    worker = make_worker(tmp_path, repository, fetcher=FakeFetcher(fail=True))
+    worker._telegram = cast(Any, FailingTelegram())
+
+    worker.process_job(claimed_job())
+
+    # Delivery failure must not raise: the job outcome is already terminal.
+    assert repository.retry is not None
+
+
+def test_worker_failure_without_telegram_client_is_a_noop(tmp_path: Path) -> None:
+    repository = FakeWorkerRepository()
+    repository.terminal_state = IngestionState.FAILED
+    worker = make_worker(tmp_path, repository, fetcher=FakeFetcher(fail=True))
+
+    worker.process_job(claimed_job())
+
+    assert repository.retry is not None
+
+
+def test_worker_is_retryable_classification() -> None:
+    import httpx
+
+    from knowledge_assistant.domain.errors import DocumentConflictError
+
+    assert IngestionWorker._is_retryable(httpx.NetworkError("temporary"))
+    assert not IngestionWorker._is_retryable(ValueError("programming error"))
+    assert not IngestionWorker._is_retryable(DocumentConflictError("already exists"))

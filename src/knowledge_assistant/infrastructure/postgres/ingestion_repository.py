@@ -83,9 +83,15 @@ class PostgresIngestionRepository:
         *,
         idempotency_key: str,
         source: ClassifiedSource,
-        recipient_key: str,
-        request_message_id: str,
+        recipient_key: str | None = None,
+        request_message_id: str | None = None,
     ) -> JobSubmission:
+        """Submit an idempotent ingestion job.
+
+        ``recipient_key=None`` records no notification subscriber: the job is
+        ingested without any completion notification, represented explicitly
+        and safely (no fake recipient such as chat ID 0).
+        """
         with self._pool.connection() as connection, connection.transaction():
             connection.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
@@ -139,16 +145,17 @@ class PostgresIngestionRepository:
                 ).fetchone()
                 created = True
             assert row is not None
-            connection.execute(
-                """
-                INSERT INTO ingestion_subscribers (
-                    job_id, client_type, recipient_key, request_message_id
+            if recipient_key is not None:
+                connection.execute(
+                    """
+                    INSERT INTO ingestion_subscribers (
+                        job_id, client_type, recipient_key, request_message_id
+                    )
+                    VALUES (%s, 'telegram', %s, COALESCE(%s, '0'))
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (row["job_id"], recipient_key, request_message_id),
                 )
-                VALUES (%s, 'telegram', %s, %s)
-                ON CONFLICT DO NOTHING
-                """,
-                (row["job_id"], recipient_key, request_message_id),
-            )
             return JobSubmission(
                 job_id=row["job_id"],
                 state=IngestionState(row["state"]),

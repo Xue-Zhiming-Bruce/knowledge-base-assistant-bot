@@ -135,3 +135,49 @@ def test_openai_planner_deduplicates_and_bounds_structured_subqueries() -> None:
     assert plan.route is QueryRoute.COMPLEX
     assert plan.subqueries == ("first", "second", "third")
     assert plan.input_tokens == 12
+
+
+def test_query_plan_rejects_empty_oversized_and_blank_subqueries() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        QueryPlan(route=QueryRoute.SIMPLE, subqueries=(), reason="r", model="m")
+    with pytest.raises(ValueError, match="more than three"):
+        QueryPlan(
+            route=QueryRoute.SIMPLE,
+            subqueries=("a", "b", "c", "d"),
+            reason="r",
+            model="m",
+        )
+    with pytest.raises(ValueError, match="blank"):
+        QueryPlan(
+            route=QueryRoute.SIMPLE,
+            subqueries=("a", "  "),
+            reason="r",
+            model="m",
+        )
+
+
+def test_diversity_reranker_rejects_non_positive_limit() -> None:
+    reranker = DiversityReranker()
+
+    with pytest.raises(ValueError, match="limit"):
+        reranker.rank((evidence("a", 0.9),), limit=0)
+
+
+def test_diversity_reranker_caps_chunks_per_document() -> None:
+    reranker = DiversityReranker(max_chunks_per_document=2)
+    same_doc = evidence("a", 0.9, document_id="doc-1")
+    other_doc = evidence("b", 0.8, document_id="doc-2")
+
+    ranked = reranker.rank((same_doc, same_doc, same_doc, other_doc), limit=10)
+
+    # The per-document cap keeps at most two chunks from doc-1.
+    assert [item.chunk_id for item in ranked] == ["a", "a", "b"]
+    with pytest.raises(ValueError, match="max_chunks_per_document"):
+        DiversityReranker(max_chunks_per_document=0)
+
+
+def test_reciprocal_rank_fusion_validates_rank_constant_and_limit() -> None:
+    with pytest.raises(ValueError, match="rank_constant"):
+        ReciprocalRankFusion(rank_constant=0)
+    with pytest.raises(ValueError, match="limit"):
+        ReciprocalRankFusion().fuse((), limit=0)

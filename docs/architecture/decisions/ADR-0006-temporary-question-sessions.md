@@ -16,6 +16,11 @@ Question sessions are explicitly started, stored in a TTL-backed session store, 
 - Conversation privacy and lifecycle are clear.
 - Session cleanup is a monitored, retryable operation.
 - Session loss affects conversational continuity but not canonical knowledge.
+- Recorded answer feedback is durable: it survives `/end` and expiry while the
+  temporary conversation content is still deleted (migration `0008` decouples
+  `answer_feedback` from the cascading session/turn deletion). Feedback rows
+  retain only privacy-safe metadata plus the opaque `(session_id, turn_number)`
+  turn reference, never question/answer text, prompts, evidence, or URLs.
 - Exporting a conversation in the future requires a separate, explicit user action and ingestion path.
 
 ## Alternatives considered

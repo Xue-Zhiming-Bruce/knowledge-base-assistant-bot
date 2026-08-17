@@ -57,7 +57,7 @@ class IngestionWorker:
         vault: VaultRepository,
         chunker: MarkdownChunker,
         embeddings: EmbeddingProvider,
-        telegram: TelegramClient,
+        telegram: TelegramClient | None = None,
         poll_seconds: float,
         instance_id: str | None = None,
         telemetry: Telemetry | None = None,
@@ -241,6 +241,10 @@ class IngestionWorker:
                 self._notify_failure(job, error)
 
     def dispatch_notifications(self) -> None:
+        if self._telegram is None:
+            # No Telegram client configured: notification-free ingestion is an
+            # explicit no-op (no fake recipient is ever fabricated).
+            return
         for notification in self._repository.claim_notifications(worker_id=self._instance_id):
             try:
                 self._telegram.send_message(
@@ -258,6 +262,8 @@ class IngestionWorker:
                 self._repository.mark_notification_delivered(notification.notification_id)
 
     def _notify_failure(self, job: ClaimedJob, error: Exception) -> None:
+        if self._telegram is None:
+            return
         for subscriber in self._repository.subscribers(job.job_id):
             try:
                 self._telegram.send_message(

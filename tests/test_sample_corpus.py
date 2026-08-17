@@ -112,7 +112,7 @@ def test_committed_manifest_is_public_safe() -> None:
     payload = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     assert payload["manifest_version"] == "sample-corpus-v1"
     assert len(payload["sources"]) >= 4
-    assert len(payload["cases"]) >= 8
+    assert len(payload["cases"]) >= 20
     for source in payload["sources"]:
         assert set(source) == {"source_id", "title", "url", "provider", "provenance"}
         assert source["url"].startswith("https://")
@@ -125,8 +125,36 @@ def test_committed_manifest_is_public_safe() -> None:
             "comparison",
             "exact_lookup",
             "insufficient_evidence",
+            "synthesis",
+            "follow_up",
+            "hard_negative",
         }
         assert case["difficulty"] in {"easy", "medium", "hard"}
+
+
+def test_committed_manifest_has_required_question_mix() -> None:
+    payload = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    types = {case["question_type"] for case in payload["cases"]}
+    no_answer = [case for case in payload["cases"] if case.get("no_answer")]
+    assert len(no_answer) >= 3  # at least three insufficient-evidence cases
+    # Required mix: single-doc, explanation, exact lookup, comparison,
+    # multi-document synthesis, follow-up style, hard negatives.
+    assert {
+        "explanation",
+        "exact_lookup",
+        "comparison",
+        "synthesis",
+        "follow_up",
+        "hard_negative",
+        "insufficient_evidence",
+    } <= types
+    assert any(case["question_type"] == "fact" for case in payload["cases"])
+    # No article bodies or long excerpts: questions and answers are concise
+    # original wording (length sanity bound), and no case stores article text.
+    for case in payload["cases"]:
+        assert len(case["question"]) <= 400
+        assert len(case["reference_answer"]) <= 900
+        assert all(len(fact) <= 220 for fact in case["required_facts"])
 
 
 def test_manifest_loader_rejects_malformed_entries(tmp_path: Path) -> None:
@@ -149,15 +177,18 @@ def test_sample_cases_to_dataset_builds_document_level_cases() -> None:
     assert all(case.document_level for case in answerable)
     assert all(case.target_document_id is not None for case in answerable)
     assert all(case.target_chunk_id is None for case in answerable)
-    assert all(case.generator_model == "human" for case in answerable)
-    assert all(case.generator_prompt_version == "sample-human-v1" for case in answerable)
+    assert all(case.generator_model == "not-recorded" for case in answerable)
+    assert all(case.generator_prompt_version == "sample-curated-v1" for case in answerable)
     assert all(case.dataset_version == "sample-docs-v1" for case in cases)
 
-    assert len(no_answer) == 1
-    assert no_answer[0].no_answer is True
-    assert no_answer[0].question_type == "insufficient_evidence"
-    assert no_answer[0].required_facts == ()
-    assert no_answer[0].target_document_id == "sample-21-lessons"
+    assert len(no_answer) == 3
+    assert all(case.no_answer for case in no_answer)
+    assert all(case.question_type == "insufficient_evidence" for case in no_answer)
+    assert all(case.required_facts == () for case in no_answer)
+    assert {case.target_document_id for case in no_answer} == {
+        "sample-21-lessons",
+        "sample-software-factories",
+    }
 
 
 def test_sample_dataset_jsonl_round_trip(tmp_path: Path) -> None:

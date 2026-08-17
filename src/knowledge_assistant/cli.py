@@ -8,6 +8,7 @@ import logging
 import os
 import signal
 from collections.abc import Sequence
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -19,12 +20,16 @@ from knowledge_assistant.application.assets import ArticleAssetMaterializer
 from knowledge_assistant.application.bot import TelegramPollingService
 from knowledge_assistant.application.deletion import ArticleDeletionService
 from knowledge_assistant.application.evaluation import (
+    _JUDGE_DIMENSIONS,
     AnswerEvaluationRunner,
     RetrievalEvaluationRunner,
     SyntheticDatasetBuilder,
+    calibrate_judge_scores,
     load_dataset,
+    load_human_labels,
     load_sample_manifest,
     render_answer_evaluation_markdown,
+    render_calibration_markdown,
     sample_cases_to_dataset,
     write_jsonl,
 )
@@ -32,7 +37,12 @@ from knowledge_assistant.application.projections import ProjectionRebuildService
 from knowledge_assistant.application.questions import QuestionService
 from knowledge_assistant.application.retrieval import RetrievalOrchestrator
 from knowledge_assistant.application.worker import IngestionWorker
-from knowledge_assistant.config import ConfigurationError, Settings, XArticleProviderName
+from knowledge_assistant.config import (
+    AnswerPromptVersion,
+    ConfigurationError,
+    Settings,
+    XArticleProviderName,
+)
 from knowledge_assistant.domain.chunks import MarkdownChunker
 from knowledge_assistant.domain.query import CitationValidator, ContextPolicy
 from knowledge_assistant.domain.retrieval import (
@@ -185,6 +195,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional model for structured LLM judging of generated answers",
     )
     answer_eval.add_argument("--generation-id", type=UUID)
+    calibrate = subparsers.add_parser(
+        "answer-eval-calibrate",
+        help="compare model-judge scores from answer-eval-run against reviewed human labels",
+    )
+    calibrate.add_argument("--results", type=Path, required=True)
+    calibrate.add_argument("--human-labels", type=Path, required=True)
+    calibrate.add_argument(
+        "--output-markdown",
+        type=Path,
+        default=None,
+        help="write a public-safe calibration markdown report",
+    )
     sample_ingest = subparsers.add_parser(
         "sample-ingest",
         help="submit the public sample manifest sources to the ingestion queue",
@@ -192,14 +214,14 @@ def build_parser() -> argparse.ArgumentParser:
     sample_ingest.add_argument(
         "--manifest",
         type=Path,
-        default=Path("data/sample/manifest.json"),
+        default=_default_manifest_path(),
     )
     sample_ingest.add_argument(
         "--recipient",
         type=int,
         default=None,
         help="numeric Telegram chat id for completion notifications "
-        "(default: first allowlisted user id)",
+        "(default: first allowlisted user id; omit for notification-free ingestion)",
     )
     sample_prepare = subparsers.add_parser(
         "sample-eval-prepare",
@@ -208,7 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
     sample_prepare.add_argument(
         "--manifest",
         type=Path,
-        default=Path("data/sample/manifest.json"),
+        default=_default_manifest_path(),
     )
     sample_prepare.add_argument("--output", type=Path, required=True)
     prefect_ingest = subparsers.add_parser(
@@ -218,14 +240,14 @@ def build_parser() -> argparse.ArgumentParser:
     prefect_ingest.add_argument(
         "--manifest",
         type=Path,
-        default=Path("data/sample/manifest.json"),
+        default=_default_manifest_path(),
     )
     prefect_ingest.add_argument(
         "--recipient",
         type=int,
         default=None,
         help="numeric Telegram chat id for completion notifications "
-        "(default: first allowlisted user id)",
+        "(default: first allowlisted user id; omit for notification-free ingestion)",
     )
     demo = subparsers.add_parser(
         "demo",
@@ -239,14 +261,14 @@ def build_parser() -> argparse.ArgumentParser:
     demo_ingest.add_argument(
         "--manifest",
         type=Path,
-        default=Path("data/sample/manifest.json"),
+        default=_default_manifest_path(),
     )
     demo_ingest.add_argument(
         "--recipient",
         type=int,
         default=None,
         help="numeric Telegram chat id for completion notifications "
-        "(default: first allowlisted user id)",
+        "(default: first allowlisted user id; omit for notification-free ingestion)",
     )
     demo_ask = demo_subparsers.add_parser(
         "ask",
@@ -259,6 +281,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=RetrievalStrategyName.WEIGHTED_HYBRID.value,
     )
     return parser
+
+
+def _default_manifest_path() -> Path:
+    """Locate the committed sample manifest for both local and container runs.
+
+    Local CLI runs use the repo-relative path; inside the Docker admin image
+    (WORKDIR /app) the same relative path misses, so the compose-mounted
+    ``/data/sample/manifest.json`` is used as a fallback.
+    """
+
+    relative = Path("data/sample/manifest.json")
+    return relative if relative.exists() else Path("/data/sample/manifest.json")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -335,6 +369,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         except ConfigurationError as error:
             print(f"configuration error: {error}")
             return 2
+    if args.command == "answer-eval-calibrate":
+        return _run_answer_calibrate(
+            results=args.results,
+            human_labels=args.human_labels,
+            output_markdown=args.output_markdown,
+        )
     if args.command == "sample-ingest":
         try:
             return _run_sample_ingest(
@@ -398,6 +438,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 2
 
 
+def _build_answer_generator(settings: Settings) -> AnswerGenerator:
+    """Build the configured production answer generator.
+
+    Single construction site for Telegram Question Mode and the CLI demo so
+    both clients cannot silently diverge. `grounded-answer-v2` is the validated
+    default; v1 is reachable only as an explicit config override.
+    """
+
+    assert settings.openai_api_key is not None
+    assert settings.generation_model is not None
+    if settings.answer_prompt_version is AnswerPromptVersion.GROUNDED_ANSWER_V1:
+        return OpenAIAnswerGenerator(
+            api_key=settings.openai_api_key,
+            model=settings.generation_model,
+        )
+    if settings.answer_prompt_version is AnswerPromptVersion.GROUNDED_ANSWER_V2:
+        return OpenAIAnswerGeneratorV2(
+            api_key=settings.openai_api_key,
+            model=settings.generation_model,
+        )
+    raise AssertionError(f"unhandled answer prompt version: {settings.answer_prompt_version}")
+
+
 def _run_bot(settings: Settings) -> int:
     settings.require_bot()
     settings.require_question_service()
@@ -430,10 +493,7 @@ def _run_bot(settings: Settings) -> int:
             planner=planner,
             telemetry=telemetry,
         ),
-        generator=OpenAIAnswerGenerator(
-            api_key=settings.openai_api_key,
-            model=settings.generation_model,
-        ),
+        generator=_build_answer_generator(settings),
         validator=CitationValidator(),
         session_ttl_seconds=settings.session_ttl_seconds,
         retrieval_strategy=settings.retrieval_strategy,
@@ -463,7 +523,6 @@ def _run_bot(settings: Settings) -> int:
 
 def _run_worker(settings: Settings) -> int:
     settings.require_worker()
-    assert settings.telegram_token is not None
     assert settings.openai_api_key is not None
     assert settings.embedding_model is not None
     _configure_logging()
@@ -500,7 +559,11 @@ def _run_worker(settings: Settings) -> int:
             api_key=settings.openai_api_key,
             model=settings.embedding_model,
         ),
-        telegram=TelegramClient(token=settings.telegram_token),
+        telegram=(
+            TelegramClient(token=settings.telegram_token)
+            if settings.telegram_token is not None
+            else None
+        ),
         poll_seconds=settings.worker_poll_seconds,
         telemetry=telemetry,
     )
@@ -810,21 +873,85 @@ def _run_answer_eval(
     return 0
 
 
+def _resolve_recipient(settings: Settings, recipient: int | None) -> int | None:
+    """Resolve the completion-notification recipient for sample/prefect ingestion.
+
+    Explicit ``--recipient`` wins; otherwise the first allowlisted user is used
+    when Telegram is configured; otherwise ``None`` means notification-free
+    ingestion (no fake recipient such as chat ID 0 is ever used).
+    """
+
+    if recipient is not None:
+        return recipient
+    allowed = sorted(settings.telegram_allowed_user_ids)
+    return allowed[0] if allowed else None
+
+
+def _run_answer_calibrate(
+    *,
+    results: Path,
+    human_labels: Path,
+    output_markdown: Path | None,
+) -> int:
+    """Compare real judge scores to reviewed human labels (calibration)."""
+
+    judge_results: list[tuple[str, str, dict[str, object]]] = []
+    for line in results.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        judge = row.get("judge")
+        if not isinstance(judge, dict):
+            continue
+        scores = {
+            dimension: float(judge[dimension])
+            for dimension in _JUDGE_DIMENSIONS
+            if isinstance(judge.get(dimension), (int, float))
+        }
+        if len(scores) == len(_JUDGE_DIMENSIONS):
+            metadata = {
+                key: judge[key]
+                for key in ("model", "prompt_version", "rubric_version")
+                if isinstance(judge.get(key), str)
+            }
+            judge_results.append(
+                (
+                    str(row["case_id"]),
+                    str(row["approach"]),
+                    {**scores, **metadata},
+                )
+            )
+    try:
+        labels = load_human_labels(human_labels)
+    except (ValueError, OSError, json.JSONDecodeError) as error:
+        print(json.dumps({"status": "not_run", "reason": str(error)}, sort_keys=True))
+        return 2
+    report = calibrate_judge_scores(labels, judge_results)
+    if report.human_label_count == 0:
+        print(
+            json.dumps(
+                {
+                    "status": "not_run",
+                    "reason": "no reviewed human labels yet; judge scores remain uncalibrated",
+                },
+                sort_keys=True,
+            )
+        )
+    else:
+        print(json.dumps(report, default=asdict, sort_keys=True))
+    if output_markdown is not None:
+        output_markdown.parent.mkdir(parents=True, exist_ok=True)
+        output_markdown.write_text(render_calibration_markdown(report), encoding="utf-8")
+    return 0
+
+
 def _run_sample_ingest(settings: Settings, *, manifest: Path, recipient: int | None) -> int:
     try:
         sample = load_sample_manifest(manifest)
     except (ValueError, OSError) as error:
         print(f"sample manifest error: {error}")
         return 2
-    if recipient is None:
-        allowed = sorted(settings.telegram_allowed_user_ids)
-        if not allowed:
-            print(
-                "configuration error: sample-ingest needs --recipient or a configured "
-                "KNOWLEDGE_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS"
-            )
-            return 2
-        recipient = allowed[0]
+    resolved_recipient = _resolve_recipient(settings, recipient)
     classifier = SourceClassifier()
     repository = PostgresIngestionRepository(settings.database_url)
     submitted = 0
@@ -847,8 +974,10 @@ def _run_sample_ingest(settings: Settings, *, manifest: Path, recipient: int | N
             submission = repository.submit(
                 idempotency_key=f"sample:{source.source_id}",
                 source=classified,
-                recipient_key=str(recipient),
-                request_message_id="0",
+                recipient_key=(
+                    str(resolved_recipient) if resolved_recipient is not None else None
+                ),
+                request_message_id=("0" if resolved_recipient is not None else None),
             )
             if submission.created:
                 submitted += 1
@@ -915,20 +1044,12 @@ def _run_prefect_ingest(
             f"'uv sync --extra orchestration': {error}"
         )
         return 2
-    if recipient is None:
-        allowed = sorted(settings.telegram_allowed_user_ids)
-        if not allowed:
-            print(
-                "configuration error: prefect-ingest needs --recipient or a configured "
-                "KNOWLEDGE_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS"
-            )
-            return 2
-        recipient = allowed[0]
+    resolved_recipient = _resolve_recipient(settings, recipient)
     try:
         result = ingest_sample_corpus_flow(
             manifest_path=str(manifest),
             database_url=settings.database_url,
-            recipient=recipient,
+            recipient=resolved_recipient,
         )
     except Exception as error:
         print(
@@ -975,10 +1096,7 @@ def _run_demo_ask(
                 ),
                 telemetry=telemetry,
             ),
-            generator=OpenAIAnswerGenerator(
-                api_key=settings.openai_api_key,
-                model=settings.generation_model,
-            ),
+            generator=_build_answer_generator(settings),
             validator=CitationValidator(),
             session_ttl_seconds=settings.session_ttl_seconds,
             retrieval_strategy=strategy_name,

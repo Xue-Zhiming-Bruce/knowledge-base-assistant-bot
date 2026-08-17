@@ -24,6 +24,17 @@ class XArticleProviderName(StrEnum):
     XQUIK_MPP = "xquik_mpp"
 
 
+class AnswerPromptVersion(StrEnum):
+    """Validated grounded-answer prompt versions.
+
+    ``grounded-answer-v2`` is the evaluated production default; v1 exists only
+    as an explicit baseline override.
+    """
+
+    GROUNDED_ANSWER_V1 = "grounded-answer-v1"
+    GROUNDED_ANSWER_V2 = "grounded-answer-v2"
+
+
 class ConfigurationError(ValueError):
     """Raised when runtime configuration is missing or unsafe."""
 
@@ -45,6 +56,7 @@ class Settings:
     xquik_mpp_max_spend_usdc: Decimal
     session_ttl_seconds: int
     retrieval_strategy: RetrievalStrategyName
+    answer_prompt_version: AnswerPromptVersion
     otel_exporter_otlp_endpoint: str | None
 
     @classmethod
@@ -119,6 +131,16 @@ class Settings:
         except ValueError as error:
             choices = ", ".join(item.value for item in RetrievalStrategyName)
             raise ConfigurationError(f"RETRIEVAL_STRATEGY must be one of: {choices}") from error
+        try:
+            answer_prompt_version = AnswerPromptVersion(
+                environ.get(
+                    f"{prefix}ANSWER_PROMPT_VERSION",
+                    AnswerPromptVersion.GROUNDED_ANSWER_V2.value,
+                )
+            )
+        except ValueError as error:
+            choices = ", ".join(item.value for item in AnswerPromptVersion)
+            raise ConfigurationError(f"ANSWER_PROMPT_VERSION must be one of: {choices}") from error
         otel_endpoint = environ.get(f"{prefix}OTEL_EXPORTER_OTLP_ENDPOINT") or None
         if otel_endpoint is not None:
             parsed_endpoint = urlsplit(otel_endpoint)
@@ -141,6 +163,7 @@ class Settings:
             xquik_mpp_max_spend_usdc=xquik_mpp_max_spend_usdc,
             session_ttl_seconds=session_ttl_seconds,
             retrieval_strategy=retrieval_strategy,
+            answer_prompt_version=answer_prompt_version,
             otel_exporter_otlp_endpoint=otel_endpoint,
         )
 
@@ -161,6 +184,7 @@ class Settings:
             "xquik_mpp_max_spend_usdc": str(self.xquik_mpp_max_spend_usdc),
             "session_ttl_seconds": self.session_ttl_seconds,
             "retrieval_strategy": self.retrieval_strategy.value,
+            "answer_prompt_version": self.answer_prompt_version.value,
             "telemetry_configured": self.otel_exporter_otlp_endpoint is not None,
         }
 
@@ -173,8 +197,6 @@ class Settings:
             )
 
     def require_worker(self) -> None:
-        if self.telegram_token is None:
-            raise ConfigurationError("TELEGRAM_TOKEN is required for completion notifications")
         if self.openai_api_key is None:
             raise ConfigurationError("OPENAI_API_KEY is required for the worker service")
         if self.embedding_model is None:

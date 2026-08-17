@@ -32,13 +32,16 @@ SUBMIT_RETRY_DELAY_SECONDS = 2
     retry_delay_seconds=SUBMIT_RETRY_DELAY_SECONDS,
 )
 def submit_sample_source(
-    source_id: str, url: str, recipient: int, database_url: str
+    source_id: str, url: str, recipient: int | None, database_url: str
 ) -> dict[str, object]:
     """Classify one manifest URL and submit an idempotent ingestion job.
 
     Retries are bounded (``SUBMIT_RETRIES``) and cover transient database and
     classification failures. An already-pending job is not an error: the
     idempotency key ``sample:<source_id>`` makes resubmission a no-op.
+    ``recipient=None`` submits without a notification subscriber (explicit,
+    notification-free ingestion); a real numeric recipient is used only when
+    provided.
     """
 
     classifier = SourceClassifier()
@@ -48,8 +51,8 @@ def submit_sample_source(
         submission = repository.submit(
             idempotency_key=f"sample:{source_id}",
             source=classified,
-            recipient_key=str(recipient),
-            request_message_id="0",
+            recipient_key=str(recipient) if recipient is not None else None,
+            request_message_id="0" if recipient is not None else None,
         )
         return {
             "source_id": source_id,
@@ -65,9 +68,14 @@ def submit_sample_source(
 def ingest_sample_corpus_flow(
     manifest_path: str,
     database_url: str,
-    recipient: int = 0,
+    recipient: int | None = None,
 ) -> dict[str, object]:
-    """Submit every source in the public sample manifest to the ingestion queue."""
+    """Submit every source in the public sample manifest to the ingestion queue.
+
+    ``recipient`` is optional: ``None`` means notification-free ingestion with
+    no fake recipient such as chat ID 0; a numeric Telegram chat id retains a
+    real completion-notification recipient.
+    """
 
     manifest = load_sample_manifest(Path(manifest_path))
     results = [

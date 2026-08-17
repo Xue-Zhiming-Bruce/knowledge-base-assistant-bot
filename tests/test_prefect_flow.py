@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from prefect.logging.handlers import PrefectConsoleHandler
+from prefect.testing.utilities import prefect_test_harness
 
 import knowledge_assistant.infrastructure.orchestration.prefect_flow as flow_module
 from knowledge_assistant.infrastructure.orchestration.prefect_flow import (
@@ -15,6 +19,34 @@ from knowledge_assistant.infrastructure.orchestration.prefect_flow import (
 )
 
 MANIFEST = Path("data/sample/manifest.json")
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _cleanup_prefect_logging_resources() -> Iterator[None]:
+    """Remove Prefect's rich console handlers after the tests run.
+
+    Prefect attaches ``PrefectConsoleHandler`` instances to its loggers; their
+    shutdown emits (e.g. 'Stopping temporary server') would otherwise write to
+    an already-closed stream during interpreter shutdown and print a
+    '--- Logging error ---' traceback after the pytest summary.
+    """
+
+    yield
+    # Prefect installs its rich console handler on the ROOT logger; its
+    # shutdown emits (e.g. 'Stopping temporary server') would otherwise write
+    # to an already-closed stream during interpreter shutdown and print a
+    # '--- Logging error ---' traceback after the pytest summary.
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        if isinstance(handler, PrefectConsoleHandler):
+            root.removeHandler(handler)
+    for name in list(logging.root.manager.loggerDict):
+        if not name.startswith("prefect"):
+            continue
+        logger = logging.getLogger(name)
+        for handler in list(logger.handlers):
+            if isinstance(handler, PrefectConsoleHandler):
+                logger.removeHandler(handler)
 
 
 class RecordingRepo:
@@ -58,11 +90,15 @@ class FlakyRepoFactory:
 
 
 def run_flow() -> dict[str, object]:
-    return ingest_sample_corpus_flow(
-        manifest_path=str(MANIFEST),
-        database_url="postgresql://user:pass@localhost/database",
-        recipient=7,
-    )
+    # The test harness starts and cleanly tears down Prefect's temporary
+    # server and logging resources, so the suite exits without the prefect
+    # 'I/O operation on closed file' shutdown logging traceback.
+    with prefect_test_harness():
+        return ingest_sample_corpus_flow(
+            manifest_path=str(MANIFEST),
+            database_url="postgresql://user:pass@localhost/database",
+            recipient=7,
+        )
 
 
 def test_prefect_flow_submits_manifest_sources_idempotently(
@@ -82,7 +118,30 @@ def test_prefect_flow_submits_manifest_sources_idempotently(
         str(submission["idempotency_key"]).startswith("sample:")
         for submission in repo.submissions
     )
+    # Telegram-enabled flow retains the real notification recipient.
+    assert all(submission["recipient_key"] == "7" for submission in repo.submissions)
     assert all(submission["request_message_id"] == "0" for submission in repo.submissions)
+
+
+def test_prefect_flow_submits_without_recipient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = RecordingRepo()
+    monkeypatch.setattr(flow_module, "PostgresIngestionRepository", RepoFactory(repo))
+
+    with prefect_test_harness():
+        result = ingest_sample_corpus_flow(
+            manifest_path=str(MANIFEST),
+            database_url="postgresql://user:pass@localhost/database",
+            recipient=None,
+        )
+
+    assert result["sources"] == 4
+    assert result["submitted"] == 3
+    assert len(repo.submissions) == 4
+    # Notification-free: no recipient and no fake chat ID 0 is ever used.
+    assert all(submission["recipient_key"] is None for submission in repo.submissions)
+    assert all(submission["request_message_id"] is None for submission in repo.submissions)
 
 
 def test_prefect_flow_exposes_task_state(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -119,9 +178,9 @@ def test_prefect_flow_fails_closed_on_missing_manifest(
     repo = RecordingRepo()
     monkeypatch.setattr(flow_module, "PostgresIngestionRepository", RepoFactory(repo))
 
-    with pytest.raises((FileNotFoundError, ValueError)):
+    with pytest.raises((FileNotFoundError, ValueError)), prefect_test_harness():
         ingest_sample_corpus_flow(
-            manifest_path="/nonexistent/manifest.json",
-            database_url="postgresql://user:pass@localhost/database",
-            recipient=7,
-        )
+                manifest_path="/nonexistent/manifest.json",
+                database_url="postgresql://user:pass@localhost/database",
+                recipient=7,
+            )

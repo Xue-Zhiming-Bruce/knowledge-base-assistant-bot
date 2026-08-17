@@ -21,6 +21,7 @@ Knowledge Assistant processes personal knowledge, untrusted internet content, an
 | Personal knowledge | Markdown bodies, source images, questions, answers, session turns | encryption, access control, minimized transmission, explicit retention |
 | Sensitive metadata | source URLs, titles, authors, document associations | restricted telemetry, encryption, access control |
 | Operational metadata | job states, versions, timings, pseudonymous IDs | retained by policy, no content payloads |
+| Answer feedback | direction, opaque turn reference, retrieval strategy, projection generation, generation model, answer prompt version, timestamp | durable by policy, no content payloads, survives temporary session deletion |
 | Public configuration | supported source types, schema versions | safe to expose |
 
 ## Identity and authorization

@@ -303,3 +303,176 @@ def test_evaluation_case_rejects_invalid_required_fields(
 
     with pytest.raises(ValueError, match="requires"):
         SyntheticEvaluationCase.from_dict(record)
+
+
+def test_human_labels_schema_validation(tmp_path: Path) -> None:
+    from knowledge_assistant.application.evaluation import load_human_labels
+
+    labels_path = tmp_path / "human-labels.jsonl"
+    labels_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "case_id": "sample-q-01",
+                        "approach": "grounded-answer-v2",
+                        "factual_correctness": 4,
+                        "groundedness": 3,
+                        "completeness": 4,
+                        "relevance_concision": 4,
+                        "uncertainty": 3,
+                        "overall": 4,
+                    }
+                ),
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    labels = load_human_labels(labels_path)
+    assert len(labels) == 1
+    assert labels[0]["case_id"] == "sample-q-01"
+
+    labels_path.write_text(
+        json.dumps({"case_id": "sample-q-02", "approach": "v2"}), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="missing fields"):
+        load_human_labels(labels_path)
+
+    labels_path.write_text(
+        json.dumps(
+            {
+                "case_id": "sample-q-02",
+                "approach": "v2",
+                "factual_correctness": 9,
+                "groundedness": 3,
+                "completeness": 4,
+                "relevance_concision": 4,
+                "uncertainty": 3,
+                "overall": 4,
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match=r"0\.\.5"):
+        load_human_labels(labels_path)
+
+
+def test_judge_calibration_computes_mae_bias_and_correlation() -> None:
+    from knowledge_assistant.application.evaluation import calibrate_judge_scores
+
+    def label(case_id: str, **scores: int) -> dict[str, object]:
+        return {"case_id": case_id, "approach": "grounded-answer-v2", **scores}
+
+    def judge(case_id: str, **scores: float) -> tuple[str, str, dict[str, object]]:
+        return case_id, "grounded-answer-v2", {
+            "model": "judge-model",
+            "prompt_version": "answer-judge-prompt-v1",
+            "rubric_version": "answer-judge-rubric-v1",
+            **scores,
+        }
+
+    human = (
+        label(
+            "c1",
+            factual_correctness=4,
+            groundedness=3,
+            completeness=4,
+            relevance_concision=4,
+            uncertainty=3,
+            overall=4,
+        ),
+        label(
+            "c2",
+            factual_correctness=2,
+            groundedness=1,
+            completeness=3,
+            relevance_concision=3,
+            uncertainty=2,
+            overall=2,
+        ),
+        label(
+            "c3",
+            factual_correctness=5,
+            groundedness=4,
+            completeness=5,
+            relevance_concision=5,
+            uncertainty=4,
+            overall=5,
+        ),
+    )
+    def scores(**values: int) -> dict[str, int]:
+        return values
+
+    judge_scores = (
+        judge(
+            "c1",
+            **scores(
+                factual_correctness=5,
+                groundedness=4,
+                completeness=4,
+                relevance_concision=5,
+                uncertainty=3,
+                overall=4,
+            ),
+        ),
+        judge(
+            "c2",
+            **scores(
+                factual_correctness=3,
+                groundedness=1,
+                completeness=3,
+                relevance_concision=3,
+                uncertainty=2,
+                overall=3,
+            ),
+        ),
+        judge(
+            "c3",
+            **scores(
+                factual_correctness=5,
+                groundedness=5,
+                completeness=5,
+                relevance_concision=4,
+                uncertainty=4,
+                overall=4,
+            ),
+        ),
+        judge(
+            "unmatched",
+            **scores(
+                factual_correctness=1,
+                groundedness=1,
+                completeness=1,
+                relevance_concision=1,
+                uncertainty=1,
+                overall=1,
+            ),
+        ),
+    )
+
+    report = calibrate_judge_scores(human, judge_scores)
+
+    assert report.human_label_count == 3
+    assert report.matched_result_count == 3
+    # Judge metadata is preserved through the calibration contract.
+    assert report.judge_model == "judge-model"
+    assert report.judge_prompt_version == "answer-judge-prompt-v1"
+    assert report.judge_rubric_version == "answer-judge-rubric-v1"
+    factual = next(d for d in report.dimensions if d.name == "factual_correctness")
+    assert factual.mean_absolute_error == pytest.approx((1 + 1 + 0) / 3)
+    assert factual.bias == pytest.approx((1 + 1 + 0) / 3)
+    assert factual.pearson is not None
+    assert factual.pearson > 0.8
+    groundedness = next(d for d in report.dimensions if d.name == "groundedness")
+    assert groundedness.bias == pytest.approx(2 / 3)
+
+
+def test_judge_calibration_without_human_labels_is_not_run() -> None:
+    from knowledge_assistant.application.evaluation import calibrate_judge_scores
+
+    report = calibrate_judge_scores((), ())
+    assert report.human_label_count == 0
+    assert report.matched_result_count == 0
+    assert all(dimension.mean_absolute_error is None for dimension in report.dimensions)

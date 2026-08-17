@@ -11,6 +11,7 @@ x-app-environment: &app-environment
   KNOWLEDGE_ASSISTANT_WORKER_POLL_SECONDS: ${KNOWLEDGE_ASSISTANT_WORKER_POLL_SECONDS:-2}
   KNOWLEDGE_ASSISTANT_SESSION_TTL_SECONDS: ${KNOWLEDGE_ASSISTANT_SESSION_TTL_SECONDS:-3600}
   KNOWLEDGE_ASSISTANT_RETRIEVAL_STRATEGY: ${KNOWLEDGE_ASSISTANT_RETRIEVAL_STRATEGY:-weighted-hybrid-v1}
+  KNOWLEDGE_ASSISTANT_ANSWER_PROMPT_VERSION: ${KNOWLEDGE_ASSISTANT_ANSWER_PROMPT_VERSION:-grounded-answer-v2}
   KNOWLEDGE_ASSISTANT_OTEL_EXPORTER_OTLP_ENDPOINT: ${KNOWLEDGE_ASSISTANT_OTEL_EXPORTER_OTLP_ENDPOINT:-}
   KNOWLEDGE_ASSISTANT_GENERATION_MODEL: ${KNOWLEDGE_ASSISTANT_GENERATION_MODEL:-}
   KNOWLEDGE_ASSISTANT_EMBEDDING_MODEL: ${KNOWLEDGE_ASSISTANT_EMBEDDING_MODEL:-}
@@ -69,6 +70,8 @@ services:
 
   bot:
     <<: *app-base
+    profiles:
+      - telegram
     command:
       - run-bot
     volumes:
@@ -133,6 +136,10 @@ services:
       - type: bind
         source: ${KNOWLEDGE_ASSISTANT_VAULT_PATH:-./var/vault}
         target: /data/vault
+      - type: bind
+        source: ./data/sample
+        target: /data/sample
+        read_only: true
       - type: bind
         source: ./var/evaluation
         target: /data/evaluation

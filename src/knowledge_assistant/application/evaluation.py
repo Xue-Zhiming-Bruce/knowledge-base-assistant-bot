@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import statistics
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from uuid import UUID
@@ -809,7 +811,7 @@ def render_answer_evaluation_markdown(
                 [
                     "",
                     f"- Judge model: `{summary.judge_model}`; "
-                    f"prompt `{summary.judge_rubric_version}`",
+                    f"rubric `{summary.judge_rubric_version}`",
                     f"- Mean factual correctness: "
                     f"{_format_optional_score(summary.mean_factual_correctness)}",
                     f"- Mean groundedness: "
@@ -1018,8 +1020,8 @@ def sample_cases_to_dataset(manifest: SampleManifest) -> tuple[SyntheticEvaluati
                     source_provider=distractor.provider if distractor else "sample",
                     question_type=case.question_type,
                     difficulty=case.difficulty,
-                    generator_model="human",
-                    generator_prompt_version="sample-human-v1",
+                    generator_model="not-recorded",
+                    generator_prompt_version="sample-curated-v1",
                     no_answer=True,
                     distractor_chunk_ids=(),
                     document_level=True,
@@ -1047,10 +1049,193 @@ def sample_cases_to_dataset(manifest: SampleManifest) -> tuple[SyntheticEvaluati
                 source_provider=source.provider,
                 question_type=case.question_type,
                 difficulty=case.difficulty,
-                generator_model="human",
-                generator_prompt_version="sample-human-v1",
+                generator_model="not-recorded",
+                generator_prompt_version="sample-curated-v1",
                 document_level=True,
                 target_url=source.url,
             )
         )
     return tuple(cases)
+
+
+_JUDGE_DIMENSIONS = (
+    "factual_correctness",
+    "groundedness",
+    "completeness",
+    "relevance_concision",
+    "uncertainty",
+    "overall",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeCalibrationDimension:
+    """Agreement between model-judge scores and reviewed human labels on one axis."""
+
+    name: str
+    mean_absolute_error: float | None
+    bias: float | None
+    pearson: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeCalibrationReport:
+    """How far the LLM judge drifts from a human-scored subset.
+
+    A report with ``human_label_count == 0`` means calibration is ``not_run``:
+    judge scores are uncalibrated model opinions until a human reviews a subset.
+    """
+
+    human_label_count: int
+    matched_result_count: int
+    judge_model: str | None
+    judge_prompt_version: str | None = None
+    judge_rubric_version: str | None = None
+    dimensions: tuple[JudgeCalibrationDimension, ...] = ()
+
+
+def load_human_labels(path: Path) -> tuple[dict[str, object], ...]:
+    """Load reviewed human labels and validate the fixed scoring schema.
+
+    Each JSONL row must carry ``case_id``, ``approach``, and the six 0-5 judge
+    dimension scores. Human labels are ground truth for calibration, so invalid
+    rows fail closed instead of being silently ignored.
+    """
+
+    labels: list[dict[str, object]] = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        value = json.loads(line)
+        if not isinstance(value, dict):
+            raise ValueError(f"human label line {line_number} is not an object")
+        missing = [
+            key
+            for key in ("case_id", "approach", *_JUDGE_DIMENSIONS)
+            if key not in value
+        ]
+        if missing:
+            raise ValueError(
+                f"human label line {line_number} is missing fields: {', '.join(missing)}"
+            )
+        for dimension in _JUDGE_DIMENSIONS:
+            score = value[dimension]
+            if not isinstance(score, int) or not 0 <= score <= 5:
+                raise ValueError(
+                    f"human label line {line_number} {dimension} must be an int in 0..5"
+                )
+        labels.append(value)
+    return tuple(labels)
+
+
+def calibrate_judge_scores(
+    human_labels: Sequence[Mapping[str, object]],
+    judge_results: Sequence[tuple[str, str, Mapping[str, object]]],
+) -> JudgeCalibrationReport:
+    """Compare model-judge scores to reviewed human labels per (case_id, approach).
+
+    ``judge_results`` items are ``(case_id, approach, metadata+scores)`` triples
+    taken from real ``answer-eval-run`` output: each scores mapping carries the
+    six 0-5 dimension scores plus the judge ``model``, ``prompt_version``, and
+    ``rubric_version`` metadata. Only matched pairs are compared. A missing or
+    empty human subset yields an empty report: calibration is ``not_run``, never
+    approximated.
+    """
+
+    by_key = {(case_id, approach): scores for case_id, approach, scores in judge_results}
+    matched = [
+        (label, by_key[(str(label["case_id"]), str(label["approach"]))])
+        for label in human_labels
+        if (str(label["case_id"]), str(label["approach"])) in by_key
+    ]
+    judge_model = next(
+        (str(result[2]["model"]) for result in judge_results if result[2].get("model")),
+        None,
+    )
+    judge_prompt_version = next(
+        (
+            str(result[2]["prompt_version"])
+            for result in judge_results
+            if result[2].get("prompt_version")
+        ),
+        None,
+    )
+    judge_rubric_version = next(
+        (
+            str(result[2]["rubric_version"])
+            for result in judge_results
+            if result[2].get("rubric_version")
+        ),
+        None,
+    )
+    return JudgeCalibrationReport(
+        human_label_count=len(human_labels),
+        matched_result_count=len(matched),
+        judge_model=judge_model,
+        judge_prompt_version=judge_prompt_version,
+        judge_rubric_version=judge_rubric_version,
+        dimensions=tuple(
+            _calibrate_dimension(name, matched) for name in _JUDGE_DIMENSIONS
+        ),
+    )
+
+
+def _calibrate_dimension(
+    name: str,
+    matched: Sequence[tuple[Mapping[str, object], Mapping[str, object]]],
+) -> JudgeCalibrationDimension:
+    human = [float(str(label[name])) for label, _ in matched]
+    judge = [float(str(scores[name])) for _, scores in matched]
+    if not human:
+        return JudgeCalibrationDimension(name, None, None, None)
+    errors = [j - h for h, j in zip(human, judge, strict=False)]
+    mean_absolute_error = sum(abs(error) for error in errors) / len(errors)
+    bias = sum(errors) / len(errors)
+    pearson: float | None = None
+    if len(errors) >= 2:
+        try:
+            pearson = statistics.correlation(human, judge)
+        except statistics.StatisticsError:
+            pearson = None
+    return JudgeCalibrationDimension(name, mean_absolute_error, bias, pearson)
+
+
+def render_calibration_markdown(report: JudgeCalibrationReport) -> str:
+    """Render a public-safe calibration summary (aggregates only)."""
+
+    lines = [
+        "# Judge Calibration Report",
+        "",
+        "Model-judge scores compared against reviewed human labels on the matched "
+        "(case, approach) subset. This report only exists once human labels have "
+        "been reviewed; until then calibration is `not_run` and judge scores are "
+        "uncalibrated model opinions.",
+        "",
+        f"- Human labels reviewed: {report.human_label_count}",
+        f"- Judge results matched: {report.matched_result_count}",
+        f"- Judge model: {report.judge_model or 'n/a'}",
+        f"- Judge prompt: {report.judge_prompt_version or 'n/a'}; "
+        f"rubric: {report.judge_rubric_version or 'n/a'}",
+        "",
+        "| Dimension | Mean absolute error | Bias (judge - human) | Pearson r |",
+        "| --- | --- | --- | --- |",
+    ]
+    for dimension in report.dimensions:
+        lines.extend(
+            [
+                f"| {dimension.name} | {_fmt_optional(dimension.mean_absolute_error)} | "
+                f"{_fmt_optional(dimension.bias)} | {_fmt_optional(dimension.pearson)} |",
+            ]
+        )
+    lines.append("")
+    lines.append(
+        "Interpretation: MAE is the average per-case distance between judge and "
+        "human scores; bias is the average signed drift (positive means the judge "
+        "scores higher than the human); Pearson r measures monotonic agreement. "
+        "Deterministic metrics and judge scores are never presented as human truth."
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _fmt_optional(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.3f}"

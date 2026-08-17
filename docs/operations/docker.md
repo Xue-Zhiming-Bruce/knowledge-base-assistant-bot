@@ -58,10 +58,20 @@ docker compose --profile test build test
 
 ```shell
 docker compose up -d --build
+# or, explicitly Telegram-free (the reviewer path):
+docker compose up -d --build postgres migrate worker
 docker compose ps
 ```
 
-Compose starts PostgreSQL, runs migrations once, then starts the bot and worker.
+Compose starts PostgreSQL, runs migrations once, then starts the worker. The
+Telegram bot is an **optional** single-user client on the explicit `telegram`
+profile; it is not started by default and is not required by the core engine,
+worker, CLI demo, or Prefect ingestion:
+
+```shell
+docker compose --profile telegram up -d bot
+```
+
 Running migration again is safe and should report that the schema is current:
 
 ```shell
@@ -124,7 +134,11 @@ available from the Grafana dashboard menu. It contains seven panels: questions
 by outcome, question latency (p95), retrieval candidates (mean), ingestion jobs
 by outcome, ingestion duration (p95), citation-validation outcomes, and answer
 feedback up/down. Grafana Explore alone is not the dashboard; the provisioned
-dashboard is the curated view.
+dashboard is the curated view. **Provisioning is not the same as live data**: the
+dashboard was also verified against real safe traffic (all seven panel PromQL
+queries returned data; no question/answer/URL/credential content in telemetry
+labels) — see [the dashboard verification report](../assets/grafana-dashboard-verification.md),
+which records the live-data status and the screenshot limitation honestly.
 
 In Grafana, open **Explore**, select the Tempo data source, and search service names
 such as `knowledge-assistant-bot`, `knowledge-assistant-worker`,
@@ -166,20 +180,25 @@ per source), and prints per-task state. Run it locally with
 
 ## Reviewer demo (no Telegram required)
 
-Reviewers can verify the real RAG path without creating a Telegram bot:
+Reviewers can verify the real RAG path without creating a Telegram bot. The
+exact Telegram-free workflow (core stack only, no bot):
 
 ```shell
+docker compose up -d --build postgres migrate worker
 docker compose --profile tools run --rm admin demo ingest
 docker compose --profile tools run --rm admin \
-  demo ask --question "What do engineers need to get good at?"
+  demo ask --question "What do engineers actually need to get good at?"
 ```
 
-`demo ingest` submits the public sample manifest; `demo ask` embeds the question,
-retrieves from the knowledge base, reranks, generates a grounded answer, validates
-citations, and prints the answer plus its `Sources` section. It never sends the
-question directly to the LLM without retrieval. `demo ask` (and `eval-*`,
-`eval-generate`, `answer-eval-run`) incur small model costs; `demo ingest`,
-`migrate`, and `sample-eval-prepare` do not.
+`demo ingest` submits the public sample manifest without requesting any
+completion notification (no recipient and no fake chat ID 0); `demo ask` embeds
+the question, retrieves from the knowledge base, reranks, generates a grounded
+answer, validates citations, and prints the answer plus its `Sources` section.
+It never sends the question directly to the LLM without retrieval. `demo ask`
+(and `eval-*`, `eval-generate`, `answer-eval-run`) incur small model costs;
+`demo ingest`, `migrate`, and `sample-eval-prepare` do not. When Telegram is
+configured, `demo ingest --recipient <chat id>` (or a configured allowlist)
+restores completion notifications for that run.
 
 ## Telegram smoke test
 
@@ -213,7 +232,7 @@ docker compose exec postgres psql \
 ```
 
 If `bot` exits with an allowlist configuration error, set the numeric Telegram
-user ID in `.env` and run `docker compose up -d bot`.
+user ID in `.env` and run `docker compose --profile telegram up -d bot`.
 
 For X failures:
 
@@ -258,6 +277,13 @@ The bot confirms the feedback was recorded. Feedback is idempotent: repeating a
 vote on the same turn reports that it was already recorded instead of creating a
 duplicate. One vote per turn per user is kept (the database constraint is
 `UNIQUE (principal_id, session_id, turn_number)`).
+
+**Durability:** feedback is durable. It survives `/end` and session expiry: the
+forward migration `0008_feedback_durable` dropped the cascading foreign keys, so
+recorded feedback rows persist after the temporary `question_sessions` and
+`session_turns` rows are deleted. Only the temporary conversation content is
+removed; the retained `(session_id, turn_number)` pair is an opaque turn
+reference with no conversational content.
 
 **Privacy:** the `answer_feedback` table stores only safe pipeline metadata -
 direction, session/turn identifiers, retrieval strategy, projection generation,

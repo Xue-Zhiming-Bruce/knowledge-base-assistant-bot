@@ -168,9 +168,12 @@ The supported retrieval strategies are exactly: `vector-only-v1`,
 
 Remaining gaps for max score: a dedicated query-rewriting best practice (only
 bounded agentic decomposition exists), cloud deployment (bonus, not attempted),
-and a larger reviewed mixed dataset (multi-document/human/follow-up cases are
-architecturally supported but the committed sample is 8 cases over 4 documents).
+and a larger independently reviewed mixed dataset (multi-document/follow-up cases are
+architecturally supported but the committed sample is 25 cases over 4 documents).
 The production retrieval default stays `weighted-hybrid-v1` until paired,
 reproducible evidence from the pre-registered
 [selection policy](docs/operations/retrieval-selection-policy.md) supports a
-change; the committed benchmark shows no candidate beating it.
+change; the committed benchmark shows no candidate satisfying all four
+preregistered gates (vector-only-v1 clears aggregate Hit@5/MRR, latency, and
+cost but regresses the exact_lookup slice MRR from 1.000 to 0.833, beyond the
+0.01 per-slice tolerance; rrf-hybrid-v1 ties Hit@5; agentic fails latency).

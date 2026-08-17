@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -32,6 +33,21 @@ def evidence() -> Evidence:
         heading_path=(),
         content="Engineers who thrive navigate people, politics, alignment, and ambiguity.",
         score=0.9,
+    )
+
+
+def second_evidence(citation_id: str = "E9") -> Evidence:
+    return Evidence(
+        citation_id=citation_id,
+        chunk_id="chunk-9",
+        document_id="doc_0123456789abcdef0123456789abcdef",
+        revision_id="rev_0123456789abcdef0123456789abcdef",
+        title="Another Lesson",
+        source_url="https://addyo.substack.com/p/21-lessons-from-14-years-at-google",
+        vault_path="Articles/substack/21-lessons.md",
+        heading_path=(),
+        content="A second supported fact about engineering craft.",
+        score=0.8,
     )
 
 
@@ -166,3 +182,72 @@ def test_demo_cli_accepts_all_retrieval_strategies() -> None:
     ):
         args = parser.parse_args(["demo", "ask", "--question", "q", "--strategy", strategy])
         assert args.strategy == strategy
+
+
+def test_centralized_generator_builder_selects_configured_version(tmp_path: Path) -> None:
+    from knowledge_assistant.cli import _build_answer_generator
+    from knowledge_assistant.config import Settings
+    from knowledge_assistant.infrastructure.openai.answers import (
+        OpenAIAnswerGenerator,
+        OpenAIAnswerGeneratorV2,
+    )
+
+    base = {
+        "KNOWLEDGE_ASSISTANT_ENVIRONMENT": "test",
+        "KNOWLEDGE_ASSISTANT_VAULT_PATH": str(tmp_path / "vault"),
+        "KNOWLEDGE_ASSISTANT_DATABASE_URL": (
+            "postgresql://knowledge_assistant:secret@localhost/knowledge_assistant"
+        ),
+        "OPENAI_API_KEY": "key",
+        "KNOWLEDGE_ASSISTANT_GENERATION_MODEL": "gpt-test",
+    }
+
+    default_v2 = _build_answer_generator(Settings.from_environment(base))
+    assert isinstance(default_v2, OpenAIAnswerGeneratorV2)
+
+    base["KNOWLEDGE_ASSISTANT_ANSWER_PROMPT_VERSION"] = "grounded-answer-v1"
+    explicit_v1 = _build_answer_generator(Settings.from_environment(base))
+    assert isinstance(explicit_v1, OpenAIAnswerGenerator)
+
+
+def test_context_policy_rejects_invalid_limits() -> None:
+    from knowledge_assistant.domain.query import ContextPolicy, bound_evidence
+
+    with pytest.raises(ValueError, match="positive"):
+        ContextPolicy(total_limit=0, per_item_limit=1)
+    with pytest.raises(ValueError, match="per_item_limit"):
+        ContextPolicy(total_limit=1, per_item_limit=2)
+
+    # Empty/whitespace content is skipped, and the budget stops further items.
+    blank = Evidence(
+        citation_id="E1",
+        chunk_id="c1",
+        document_id="doc_0123456789abcdef0123456789abcdef",
+        revision_id="rev_0123456789abcdef0123456789abcdef",
+        title="t",
+        source_url="https://example.com/s",
+        vault_path="Articles/t.md",
+        heading_path=(),
+        content="   ",
+        score=0.1,
+    )
+    assert bound_evidence((blank,), policy=ContextPolicy(total_limit=100, per_item_limit=10)) == ()
+    assert bound_evidence((), policy=ContextPolicy(total_limit=100, per_item_limit=10)) == ()
+
+
+def test_citation_validator_rejects_undeclared_markers() -> None:
+    from knowledge_assistant.domain.query import AnswerValidationError
+
+    validator = CitationValidator()
+    # E9 must be available evidence so validation reaches the marker-declared check.
+    evidence_pool = (evidence(), second_evidence(citation_id="E9"))
+    undeclared_marker = GeneratedAnswer(
+        answer="Claim [E9].",
+        citation_ids=("E1",),
+        sufficient_evidence=True,
+        model="m",
+        input_tokens=1,
+        output_tokens=1,
+    )
+    with pytest.raises(AnswerValidationError, match="markers must be included"):
+        validator.validate(undeclared_marker, evidence_pool)

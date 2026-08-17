@@ -17,6 +17,9 @@ Use Docker Compose as the supported local integration environment. Run PostgreSQ
 
 The initial foundation exposes only real runnable roles: PostgreSQL, migration, administration, and tests. API and worker services will be added when their entry points and health contracts exist.
 
+Implementation note (2026-08-17): the worker and optional Telegram bot roles now
+have real entry points and health contracts and are included in `compose.yaml`.
+
 ## Consequences
 
 - Local development and deployed execution share the same Python artifact.
@@ -47,4 +50,3 @@ Reconsider this decision if:
 - [Deployment and Evolution](../11-deployment-and-evolution.md)
 - [Security, Privacy, and Reliability](../10-security-privacy-and-reliability.md)
 - [Verification Strategy](../13-verification-strategy.md)
-

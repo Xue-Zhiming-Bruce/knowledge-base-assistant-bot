@@ -13,12 +13,12 @@ configuring another strategy never changes live retrieval.
 
 ## Evidence base
 
-The default may only be compared on the **same reviewed dataset**, pinned to the
+The default may only be compared on the **same frozen dataset**, pinned to the
 same projection generation, canonical snapshot, embedding model, reranker, and
 environment. Acceptable datasets:
 
-- `sample-docs-v1` — human-authored document-level cases from
-  `data/sample/manifest.json` (natural intent, including one insufficient-evidence case);
+- `sample-docs-v1` — curated document-level cases from
+  `data/sample/manifest.json` (natural intent, including three insufficient-evidence cases);
 - `synthetic-chunks-v2` — generated with lexical-overlap controls and the
   source-blind naturalizer (documented residual bias: questions are still
   generated from target chunks).

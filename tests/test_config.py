@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from knowledge_assistant.config import (
+    AnswerPromptVersion,
     ConfigurationError,
     Environment,
     Settings,
@@ -39,6 +40,8 @@ def test_settings_load_and_redact_secrets(tmp_path: Path) -> None:
     assert settings.x_article_provider is XArticleProviderName.XQUIK_MPP
     assert settings.xquik_mpp_max_spend_usdc == Decimal("0.001")
     assert settings.retrieval_strategy is RetrievalStrategyName.WEIGHTED_HYBRID
+    assert settings.answer_prompt_version is AnswerPromptVersion.GROUNDED_ANSWER_V2
+    assert settings.redacted_summary()["answer_prompt_version"] == "grounded-answer-v2"
     assert settings.otel_exporter_otlp_endpoint is None
 
 
@@ -133,6 +136,7 @@ def test_service_configuration_and_requirements(tmp_path: Path) -> None:
         ("KNOWLEDGE_ASSISTANT_XQUIK_MPP_MAX_SPEND_USDC", "0", "between"),
         ("KNOWLEDGE_ASSISTANT_XQUIK_MPP_MAX_SPEND_USDC", "1.1", "between"),
         ("KNOWLEDGE_ASSISTANT_RETRIEVAL_STRATEGY", "unknown", "must be one of"),
+        ("KNOWLEDGE_ASSISTANT_ANSWER_PROMPT_VERSION", "baseline", "must be one of"),
         ("KNOWLEDGE_ASSISTANT_OTEL_EXPORTER_OTLP_ENDPOINT", "file:///tmp/x", "HTTP"),
     ],
 )
@@ -154,7 +158,9 @@ def test_service_requirements_fail_closed(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="TELEGRAM_TOKEN"):
         settings.require_bot()
-    with pytest.raises(ConfigurationError, match="completion notifications"):
+    # The worker must not require Telegram: without a token it only needs the
+    # OpenAI embedding credentials, not completion-notification configuration.
+    with pytest.raises(ConfigurationError, match="OPENAI_API_KEY"):
         settings.require_worker()
 
     environment = valid_environment(tmp_path)
@@ -169,6 +175,43 @@ def test_service_requirements_fail_closed(tmp_path: Path) -> None:
     settings = Settings.from_environment(environment)
     with pytest.raises(ConfigurationError, match="EMBEDDING_MODEL"):
         settings.require_worker()
+
+
+def test_worker_does_not_require_telegram_token(tmp_path: Path) -> None:
+    environment = valid_environment(tmp_path)
+    environment.update(
+        {
+            "OPENAI_API_KEY": "key",
+            "KNOWLEDGE_ASSISTANT_EMBEDDING_MODEL": "embedding",
+        }
+    )
+
+    Settings.from_environment(environment).require_worker()
+
+
+def test_require_question_service_fails_closed(tmp_path: Path) -> None:
+    environment = valid_environment(tmp_path)
+    with pytest.raises(ConfigurationError, match="OPENAI_API_KEY"):
+        Settings.from_environment(environment).require_question_service()
+    environment["OPENAI_API_KEY"] = "key"
+    with pytest.raises(ConfigurationError, match="EMBEDDING_MODEL"):
+        Settings.from_environment(environment).require_question_service()
+    environment["KNOWLEDGE_ASSISTANT_EMBEDDING_MODEL"] = "embedding"
+    with pytest.raises(ConfigurationError, match="GENERATION_MODEL"):
+        Settings.from_environment(environment).require_question_service()
+    environment["KNOWLEDGE_ASSISTANT_GENERATION_MODEL"] = "gpt-test"
+    Settings.from_environment(environment).require_question_service()
+
+
+def test_require_projection_service_fails_closed(tmp_path: Path) -> None:
+    environment = valid_environment(tmp_path)
+    with pytest.raises(ConfigurationError, match="OPENAI_API_KEY"):
+        Settings.from_environment(environment).require_projection_service()
+    environment["OPENAI_API_KEY"] = "key"
+    with pytest.raises(ConfigurationError, match="EMBEDDING_MODEL"):
+        Settings.from_environment(environment).require_projection_service()
+    environment["KNOWLEDGE_ASSISTANT_EMBEDDING_MODEL"] = "embedding"
+    Settings.from_environment(environment).require_projection_service()
 
 
 def test_xquik_provider_requires_worker_only_secret(tmp_path: Path) -> None:
@@ -203,6 +246,15 @@ def test_settings_reject_unknown_x_article_provider(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="xquik, xquik_mpp"):
         Settings.from_environment(environment)
+
+
+def test_answer_prompt_version_explicit_v1_override(tmp_path: Path) -> None:
+    environment = valid_environment(tmp_path)
+    environment["KNOWLEDGE_ASSISTANT_ANSWER_PROMPT_VERSION"] = "grounded-answer-v1"
+
+    settings = Settings.from_environment(environment)
+
+    assert settings.answer_prompt_version is AnswerPromptVersion.GROUNDED_ANSWER_V1
 
 
 def test_settings_load_agentic_strategy_and_telemetry(tmp_path: Path) -> None:
