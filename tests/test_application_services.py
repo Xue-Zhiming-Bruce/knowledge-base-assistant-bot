@@ -170,7 +170,7 @@ def test_bot_rejects_unknown_user_and_explains_invalid_input() -> None:
 
     service.process_update(update("https://medium.com/private", sender=99))
     service.process_update(update("hello"))
-    service.process_update(update("https://example.com/article"))
+    service.process_update(update("https://x.com/example"))
 
     assert repository.submissions == []
     assert len(telegram.sent) == 2

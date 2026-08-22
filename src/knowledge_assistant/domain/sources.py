@@ -123,9 +123,7 @@ class SourceClassifier:
         elif hostname == "substack.com" or hostname.endswith(".substack.com"):
             provider = SourceProvider.SUBSTACK
         else:
-            raise UnsupportedSourceError(
-                "Only Medium, Substack, and rich X Article URLs are supported currently."
-            )
+            provider = SourceProvider.WEB
 
         canonical_url = self._canonicalize(parsed)
         digest = hashlib.sha256(f"{provider.value}\0{canonical_url}".encode()).hexdigest()

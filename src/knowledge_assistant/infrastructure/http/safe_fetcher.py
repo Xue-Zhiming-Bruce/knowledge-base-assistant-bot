@@ -195,6 +195,9 @@ class SafeHttpFetcher:
 
     @staticmethod
     def _same_provider_host(original: str, current: str, provider: str) -> bool:
+        if provider == "web":
+            # ponytail: apex/www treated as one host; per-site redirect maps only if needed
+            return original.removeprefix("www.") == current.removeprefix("www.")
         suffix = ".medium.com" if provider == "medium" else ".substack.com"
         root = suffix.removeprefix(".")
         return (original == root or original.endswith(suffix)) and (

@@ -233,7 +233,7 @@ class TelegramPollingService:
             self._telegram.send_message(
                 chat_id=message.chat_id,
                 text=(
-                    "Send a Medium, Substack, or rich X Article URL to save it, "
+                    "Send a Medium, Substack, X Article, or blog article URL to save it, "
                     "use /answer to start Question Mode, or /delete <exact article title>."
                 ),
                 reply_to_message_id=message.message_id,

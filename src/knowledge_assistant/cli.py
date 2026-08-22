@@ -44,6 +44,7 @@ from knowledge_assistant.config import (
     XArticleProviderName,
 )
 from knowledge_assistant.domain.chunks import MarkdownChunker
+from knowledge_assistant.domain.documents import SourceProvider
 from knowledge_assistant.domain.query import CitationValidator, ContextPolicy
 from knowledge_assistant.domain.retrieval import (
     DiversityReranker,
@@ -51,6 +52,7 @@ from knowledge_assistant.domain.retrieval import (
 )
 from knowledge_assistant.domain.sources import SourceClassifier, UnsupportedSourceError
 from knowledge_assistant.infrastructure.extraction.article import (
+    ArticleExtractor,
     MediumArticleExtractor,
     SubstackArticleExtractor,
     XArticleExtractor,
@@ -544,12 +546,14 @@ def _run_worker(settings: Settings) -> int:
             {
                 MediumArticleExtractor.PROVIDER: MediumFeedFallbackFetcher(safe_fetcher),
                 SubstackArticleExtractor.PROVIDER: safe_fetcher,
+                SourceProvider.WEB: safe_fetcher,
                 XArticleExtractor.PROVIDER: XArticleFetcher(article_provider=article_provider),
             }
         ),
         extractors={
             MediumArticleExtractor.PROVIDER: MediumArticleExtractor(),
             SubstackArticleExtractor.PROVIDER: SubstackArticleExtractor(),
+            SourceProvider.WEB: ArticleExtractor(),
             XArticleExtractor.PROVIDER: XArticleExtractor(),
         },
         asset_materializer=ArticleAssetMaterializer(SafeImageFetcher()),

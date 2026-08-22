@@ -15,10 +15,15 @@ def test_source_classifier_canonicalizes_supported_urls() -> None:
         "http://Example.Medium.com/story/?utm_source=email&keep=yes#section"
     )
     substack = classifier.classify("https://writer.substack.com/p/story?ref=home")
+    blog = classifier.classify("http://Blog.Example.org/posts/notes/?utm_source=rss#top")
 
     assert medium.canonical_url == "https://example.medium.com/story?keep=yes"
     assert medium.normalized_source_key.startswith("medium:sha256:")
     assert substack.canonical_url == "https://writer.substack.com/p/story"
+    assert blog.provider is SourceProvider.WEB
+    assert blog.source_type is SourceType.ARTICLE
+    assert blog.canonical_url == "https://blog.example.org/posts/notes"
+    assert blog.normalized_source_key.startswith("web:sha256:")
     assert DocumentId.derive_from_source(medium.normalized_source_key) == (
         DocumentId.derive_from_source(medium.normalized_source_key)
     )
@@ -45,7 +50,6 @@ def test_source_classifier_normalizes_x_post_aliases(url: str) -> None:
     "url",
     [
         "not-a-url",
-        "https://example.com/article",
         "https://user:pass@medium.com/a",
         "https://x.com/example",
     ],

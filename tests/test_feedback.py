@@ -744,9 +744,9 @@ def test_bot_submits_source_url_and_help_paths() -> None:
         poll_timeout_seconds=1,
         questions=cast(Any, FakeBotQuestions()),
     )
-    unsupported.process_update(bot_update("https://example.com/random"))
+    unsupported.process_update(bot_update("https://x.com/example"))
     unsupported_reply = cast(FakeBotTelegram, unsupported._telegram).sent[0]
-    assert "Only Medium, Substack, and rich X Article URLs" in unsupported_reply
+    assert "X Article or thread URL containing /status/" in unsupported_reply
 
     inactive = FakeBotQuestions()
     inactive.active = False
@@ -759,6 +759,6 @@ def test_bot_submits_source_url_and_help_paths() -> None:
         questions=cast(Any, inactive),
     )
     help_bot.process_update(bot_update("hello there"))
-    assert "Send a Medium, Substack, or rich X Article URL" in cast(
+    assert "Send a Medium, Substack, X Article, or blog article URL" in cast(
         FakeBotTelegram, help_bot._telegram
     ).sent[0]

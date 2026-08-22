@@ -99,6 +99,7 @@ class SourceProvider(StrEnum):
     SUBSTACK = "substack"
     MEDIUM = "medium"
     X = "x"
+    WEB = "web"
     OTHER = "other"
 
 

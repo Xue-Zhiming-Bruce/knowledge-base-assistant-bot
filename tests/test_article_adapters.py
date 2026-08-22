@@ -143,6 +143,32 @@ def test_safe_fetcher_fetches_html_and_follows_provider_redirect() -> None:
     assert result.body == b"<html>article</html>"
 
 
+def test_safe_fetcher_allows_web_source_and_cross_www_redirect() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "earendil.com":
+            return httpx.Response(
+                301,
+                headers={"location": "https://www.earendil.com/posts/notes/"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html; charset=utf-8"},
+            content=b"<html><article>" + b"word " * 100 + b"</article></html>",
+            request=request,
+        )
+
+    fetcher = SafeHttpFetcher(
+        resolver=lambda _host: ("93.184.216.34",),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    source = SourceClassifier().classify("https://earendil.com/posts/notes/")
+
+    result = fetcher.fetch(source)
+
+    assert result.final_url == "https://www.earendil.com/posts/notes/"
+
+
 @pytest.mark.parametrize(
     ("status", "retryable"),
     [(429, True), (503, True), (404, False)],
