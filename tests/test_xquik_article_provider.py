@@ -95,6 +95,36 @@ def test_xquik_fetches_and_preserves_ordered_blocks_without_exposing_key() -> No
     assert secret not in repr(article)
 
 
+def test_xquik_accepts_empty_paragraph_as_blank_line() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response(
+            request,
+            {
+                "article": {
+                    "title": "Blank lines",
+                    "contents": [
+                        {"type": "paragraph", "text": "before"},
+                        {"type": "paragraph", "text": ""},
+                        {"type": "paragraph", "text": "after"},
+                    ],
+                },
+                "author": {"username": "example", "name": "Example Author"},
+            },
+        )
+
+    provider = XquikArticleProvider(
+        api_key="xq_key",
+        client=httpx.Client(
+            base_url="https://xquik.com/api/v1",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+
+    document = provider.fetch_article("1234567890123456789")
+
+    assert [block.text for block in document.blocks] == ["before", "", "after"]
+
+
 @pytest.mark.parametrize(
     "block",
     [

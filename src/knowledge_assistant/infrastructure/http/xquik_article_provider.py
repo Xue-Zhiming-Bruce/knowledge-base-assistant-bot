@@ -126,7 +126,9 @@ class XquikArticlePayloadParser:
                 height=height,
             )
 
-        text = self._required_text(value, "text")
+        # X's editor emits author-inserted blank lines as empty paragraphs;
+        # an empty string is their lossless representation.
+        text = self._block_text(value, "text")
         styles_value = value.get("inlineStyleRanges", ())
         if not isinstance(styles_value, Sequence) or isinstance(styles_value, (str, bytes)):
             raise self._schema_error(f"contents[{index}].inlineStyleRanges is not an array")
@@ -143,7 +145,7 @@ class XquikArticlePayloadParser:
     ) -> XArticleBlock:
         """Accept only the losslessly representable Markdown variants Xquik emits."""
 
-        text = self._required_text(value, "text")
+        text = self._block_text(value, "text")
         if value.get("inlineStyleRanges") not in (None, ()):
             raise self._schema_error(f"contents[{index}] markdown contains inline styles")
         match = _FENCED_CODE_BLOCK.fullmatch(text)
@@ -281,6 +283,15 @@ class XquikArticlePayloadParser:
                 retryable=True,
                 status_code=429,
             )
+
+    @staticmethod
+    def _block_text(value: Mapping[str, Any], key: str) -> str:
+        """Block text may be empty (blank line) but must be present and a string."""
+
+        result = value.get(key)
+        if not isinstance(result, str):
+            raise XquikArticlePayloadParser._schema_error(f"{key} is missing")
+        return result
 
     @staticmethod
     def _required_text(value: Mapping[str, Any], key: str) -> str:
