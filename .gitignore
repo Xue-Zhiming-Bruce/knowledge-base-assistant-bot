@@ -29,3 +29,7 @@ knowledge-assistant.venv/
 # Local runtime data
 var/
 *.log
+
+# Local agent/working files
+AGENTS.md
+requirements.md
