@@ -1,9 +1,10 @@
 # Knowledge Assistant
 
-A personal knowledge engine that saves long-form articles (Substack, Medium, X
-Articles) as canonical Markdown in your own Obsidian vault and answers questions
-with grounded, cited answers from your saved knowledge — through a Telegram bot,
-a non-Telegram CLI demo, and a reproducible evaluation/benchmark harness.
+A personal knowledge engine that saves long-form articles (blog posts,
+Substack, Medium, X Articles) as canonical Markdown in your own Obsidian vault
+and answers questions with grounded, cited answers from your saved knowledge —
+through a Telegram bot, a non-Telegram CLI demo, and a reproducible
+evaluation/benchmark harness.
 
 ## Who this is for
 
@@ -29,9 +30,9 @@ of guessing.
 
 ## What it does
 
-- **Saves** public Substack, Medium, and rich X Articles as canonical Markdown in
-  an Obsidian vault (X Articles are Article-only via Xquik, with strict
-  lossless-block validation; anything lossy fails explicitly).
+- **Saves** public blog posts, Substack, Medium, and rich X Articles as canonical
+  Markdown in an Obsidian vault (X Articles are Article-only via Xquik, with
+  strict lossless-block validation; anything lossy fails explicitly).
   ![Saving an article](docs/assets/images/screenshot-save.png)
 - **Indexes** every saved document into a rebuildable PostgreSQL projection
   (dense embeddings + full-text) scoped to a projection generation.
@@ -53,6 +54,7 @@ of guessing.
 
 | Source | Provider | Notes |
 | --- | --- | --- |
+| Any public blog/article page | `web` | static HTML pages from any HTTPS site |
 | Substack essays | `substack` | including `.substack.com` publications |
 | Medium articles | `medium` | with a bounded RSS fallback for HTTP 403 |
 | X Articles | `xquik_mpp` / `xquik` | Article-only; ordinary posts/threads fail clearly |
@@ -61,7 +63,7 @@ of guessing.
 
 ```mermaid
 flowchart LR
-    S["Sources: Substack / Medium / X Article URLs"] -->|submit idempotent job| W[Worker]
+    S["Sources: any blog / Substack / Medium / X Article URLs"] -->|submit idempotent job| W[Worker]
     W -->|fetch + extract| V[(Obsidian vault<br/>canonical Markdown)]
     W -->|chunk + embed| P[(PostgreSQL + pgvector<br/>rebuildable projection)]
     Q[Question] --> R[RetrievalOrchestrator<br/>strategy: vector / lexical / hybrid / RRF / agentic]
@@ -310,9 +312,10 @@ Docker Compose. The dashboard is provisioned automatically from
 
 ## Limitations
 
-- Sources are limited to public Substack, Medium, and X Article URLs; paywalled
-  or JavaScript-only pages fail with explicit errors (Medium has an RSS
-  fallback).
+- Sources are limited to publicly fetchable article pages; paywalled or
+  JavaScript-only pages fail with explicit errors (Medium has an RSS fallback).
+- JavaScript-rendered blogs have no extractable static HTML and fail at the
+  quality gate rather than ingesting garbage.
 - The committed benchmark is a 25-case sample over 4 documents; scores are
   indicative, not statistically significant, and the retrieval default stays
   `weighted-hybrid-v1` until a larger independently reviewed dataset supports a
