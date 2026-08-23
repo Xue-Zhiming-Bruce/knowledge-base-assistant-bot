@@ -73,9 +73,6 @@ flowchart LR
     W -->|OTLP| G
 ```
 
-The architecture source of truth starts at
-[docs/architecture/README.md](./docs/architecture/README.md).
-
 ## Sample dataset (committed, public-safe)
 
 `data/sample/manifest.json` is a reproducible, public-safe sample corpus: four
@@ -209,10 +206,8 @@ docker compose --profile tools run --rm prefect-ingest
 
 All scores below are **real output** from runs against the committed
 `sample-docs-v1` dataset on projection `bd3a3ba7-…` (`text-embedding-3-small`,
-1536 dims). Nothing is fabricated. Run commands and caveats are documented in
-[docs/operations/evaluation.md](./docs/operations/evaluation.md); the selection
-policy is pre-registered in
-[docs/operations/retrieval-selection-policy.md](./docs/operations/retrieval-selection-policy.md).
+1536 dims). Nothing is fabricated; every benchmark command is reproducible with
+the `knowledge-assistant` CLI.
 
 ### Retrieval (25 cases, 5 strategies)
 
@@ -305,7 +300,8 @@ prompts, or tokens — and feeds the `feedback_total` metric. The curated
 **Knowledge Assistant** Grafana dashboard (7 panels: questions by outcome,
 question latency, retrieval candidates, ingestion jobs/duration, citation
 outcomes, feedback) is provisioned automatically from `config/grafana/` via
-Docker Compose. See [docs/operations/docker.md](./docs/operations/docker.md).
+Docker Compose. The dashboard is provisioned automatically from
+`config/grafana/`.
 
 ## Limitations
 
@@ -347,28 +343,3 @@ Docker Compose. See [docs/operations/docker.md](./docs/operations/docker.md).
 - Projection changes require `projection-rebuild` + atomic
   `projection-activate`; the live projection is never replaced by a partial
   index.
-
-## Rubric mapping (LLM Zoomcamp 2026)
-
-| Rubric item | Where to look | Evidence |
-| --- | --- | --- |
-| Problem description | README above; architecture goals | [docs/architecture/01-goals-and-principles.md](./docs/architecture/01-goals-and-principles.md) |
-| Retrieval flow (KB + LLM) | `demo ask` real RAG path | [application/retrieval.py](./src/knowledge_assistant/application/retrieval.py), [application/questions.py](./src/knowledge_assistant/application/questions.py) |
-| Retrieval evaluation | 5 strategies, real numbers | [data/sample/benchmark-summary.md](./data/sample/benchmark-summary.md) |
-| LLM evaluation | 2 answer approaches, real numbers | [data/sample/answer-benchmark-summary.md](./data/sample/answer-benchmark-summary.md) |
-| Interface | Telegram bot + non-Telegram CLI demo | [application/bot.py](./src/knowledge_assistant/application/bot.py), `demo ask` |
-| Ingestion pipeline | async worker + optional Prefect flow | [application/worker.py](./src/knowledge_assistant/application/worker.py), [infrastructure/orchestration/prefect_flow.py](./src/knowledge_assistant/infrastructure/orchestration/prefect_flow.py) |
-| Monitoring | `/feedback` + 7-panel Grafana dashboard | [docs/operations/docker.md](./docs/operations/docker.md) |
-| Containerization | everything in docker-compose | [compose.yaml](./compose.yaml) |
-| Reproducibility | pinned deps, committed data, not_run honesty | [docs/operations/evaluation.md](./docs/operations/evaluation.md) |
-| Best practice: hybrid search | default weighted hybrid + RRF | [domain/retrieval.py](./src/knowledge_assistant/domain/retrieval.py) |
-| Best practice: re-ranking | deterministic diversity reranker | [domain/retrieval.py](./src/knowledge_assistant/domain/retrieval.py) |
-| Best practice: query rewriting | agentic decomposition (bounded) | [infrastructure/openai/planning.py](./src/knowledge_assistant/infrastructure/openai/planning.py) |
-
-## Documentation
-
-- [Architecture](./docs/architecture/README.md) — goals, boundaries, ADRs
-- [Evaluation & projection operations](./docs/operations/evaluation.md)
-- [Docker operations runbook](./docs/operations/docker.md)
-- [Retrieval selection policy](./docs/operations/retrieval-selection-policy.md)
-- [Sample corpus](./data/sample/README.md)
