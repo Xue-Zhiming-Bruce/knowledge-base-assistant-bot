@@ -22,8 +22,7 @@ knowledge-assistant.venv/
 # IDE and operating system
 .DS_Store
 *.png
-!f51a213de3910b57920985cc5b5843ca.png
-!c9e37fce59a196caa4927a432dfc4b66.png
+!docs/assets/images/*.png
 .idea/
 .vscode/
 
