@@ -352,7 +352,7 @@ Docker Compose. See [docs/operations/docker.md](./docs/operations/docker.md).
 
 | Rubric item | Where to look | Evidence |
 | --- | --- | --- |
-| Problem description | README above; requirements.md | [requirements.md](./requirements.md) |
+| Problem description | README above; architecture goals | [docs/architecture/01-goals-and-principles.md](./docs/architecture/01-goals-and-principles.md) |
 | Retrieval flow (KB + LLM) | `demo ask` real RAG path | [application/retrieval.py](./src/knowledge_assistant/application/retrieval.py), [application/questions.py](./src/knowledge_assistant/application/questions.py) |
 | Retrieval evaluation | 5 strategies, real numbers | [data/sample/benchmark-summary.md](./data/sample/benchmark-summary.md) |
 | LLM evaluation | 2 answer approaches, real numbers | [data/sample/answer-benchmark-summary.md](./data/sample/answer-benchmark-summary.md) |
