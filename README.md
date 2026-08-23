@@ -132,6 +132,11 @@ docker compose up -d --build
 > invocation `PYTHONPATH=src uv run pytest` and `MYPYPATH=src uv run mypy` (or
 > `uv sync --no-editable` to avoid the marker entirely). The Docker test image
 > runs plain `pytest` with no workaround.
+>
+> One integration test (`test_lexical_retrieval.py`) needs a live database whose
+> projection contains the committed sample corpus (ingest it with the
+> `sample-ingest` CLI command). Without it — or without any database — the test
+> skips automatically; everything else runs hermetically.
 
 ### Environment and credentials
 
