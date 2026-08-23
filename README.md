@@ -32,10 +32,12 @@ of guessing.
 - **Saves** public Substack, Medium, and rich X Articles as canonical Markdown in
   an Obsidian vault (X Articles are Article-only via Xquik, with strict
   lossless-block validation; anything lossy fails explicitly).
+  ![image](f51a213de3910b57920985cc5b5843ca.png)
 - **Indexes** every saved document into a rebuildable PostgreSQL projection
   (dense embeddings + full-text) scoped to a projection generation.
 - **Answers** questions with a grounded, cited answer through five selectable
   retrieval strategies (`weighted-hybrid-v1` is the production default).
+    ![image](c9e37fce59a196caa4927a432dfc4b66.png)
 - **Evaluates** retrieval and end-to-end answers against a committed, curated,
   public-safe sample dataset — with real, reproducible numbers.
   Evaluation target validation is chunk-level (chunk id + content fingerprint)
