@@ -58,6 +58,16 @@ class ProjectionDocument:
     vault_path: str
 
 
+@dataclass(frozen=True, slots=True)
+class PendingTopicFiling:
+    document_id: str
+    title: str
+    provider: str
+    pending_vault_path: str
+    chat_id: str | None
+    question_message_id: str | None
+
+
 class PostgresIngestionRepository:
     """Coordinate idempotent submissions, worker claims, and derived writes."""
 
@@ -371,6 +381,156 @@ class PostgresIngestionRepository:
                 """,
                 (revision.revision_id.value, revision.document_id.value),
             )
+
+    def record_pending_filing(
+        self,
+        *,
+        job_id: uuid.UUID,
+        document_id: DocumentId,
+        title: str,
+        provider: str,
+        pending_vault_path: str,
+    ) -> None:
+        """Record a filed-later article; chat comes from the job's subscriber."""
+
+        with self._pool.connection() as connection, connection.transaction():
+            subscriber = connection.execute(
+                """
+                SELECT recipient_key
+                FROM ingestion_subscribers
+                WHERE job_id = %s AND client_type = 'telegram'
+                ORDER BY created_at
+                LIMIT 1
+                """,
+                (job_id,),
+            ).fetchone()
+            connection.execute(
+                """
+                INSERT INTO pending_topic_filings (
+                    document_id, title, provider, pending_vault_path,
+                    chat_id, question_message_id
+                )
+                VALUES (%s, %s, %s, %s, %s, NULL)
+                ON CONFLICT (document_id) DO NOTHING
+                """,
+                (
+                    document_id.value,
+                    title,
+                    provider,
+                    pending_vault_path,
+                    subscriber["recipient_key"] if subscriber is not None else None,
+                ),
+            )
+
+    def unnotified_pending_filings(self) -> tuple[PendingTopicFiling, ...]:
+        with self._pool.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT document_id, title, provider, pending_vault_path,
+                       chat_id, question_message_id
+                FROM pending_topic_filings
+                WHERE notified_at IS NULL
+                ORDER BY created_at
+                """
+            ).fetchall()
+        return tuple(
+            PendingTopicFiling(
+                document_id=row["document_id"],
+                title=row["title"],
+                provider=row["provider"],
+                pending_vault_path=row["pending_vault_path"],
+                chat_id=row["chat_id"],
+                question_message_id=row["question_message_id"],
+            )
+            for row in rows
+        )
+
+    def requeue_pending_filings(self) -> None:
+        """Ask about every unresolved filing again after a bot restart."""
+
+        with self._pool.connection() as connection:
+            connection.execute(
+                """
+                UPDATE pending_topic_filings
+                SET notified_at = NULL, question_message_id = NULL
+                """
+            )
+
+    def mark_filing_notified(
+        self,
+        document_id: str,
+        *,
+        chat_id: str | None,
+        question_message_id: str | None,
+    ) -> None:
+        with self._pool.connection() as connection:
+            connection.execute(
+                """
+                UPDATE pending_topic_filings
+                SET chat_id = %s, question_message_id = %s, notified_at = now()
+                WHERE document_id = %s
+                """,
+                (chat_id, question_message_id, document_id),
+            )
+
+    def find_pending_filing_by_question_message(
+        self,
+        question_message_id: str,
+    ) -> PendingTopicFiling | None:
+        with self._pool.connection() as connection:
+            row = connection.execute(
+                """
+                SELECT document_id, title, provider, pending_vault_path,
+                       chat_id, question_message_id
+                FROM pending_topic_filings
+                WHERE question_message_id = %s
+                """,
+                (question_message_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return PendingTopicFiling(
+            document_id=row["document_id"],
+            title=row["title"],
+            provider=row["provider"],
+            pending_vault_path=row["pending_vault_path"],
+            chat_id=row["chat_id"],
+            question_message_id=row["question_message_id"],
+        )
+
+    def resolve_pending_filing(
+        self,
+        document_id: str,
+        *,
+        new_vault_path: str,
+        move: Callable[[], None],
+    ) -> bool:
+        """Point the current revision at the filed path and clear the filing.
+
+        The guarded vault operation runs inside the transaction, mirroring
+        ``delete_document``: a vault conflict rolls the database update back.
+        """
+
+        with self._pool.connection() as connection, connection.transaction():
+            result = connection.execute(
+                """
+                UPDATE document_revisions AS revision
+                SET vault_path = %s
+                WHERE revision.document_id = %s
+                  AND revision.revision_id = (
+                      SELECT current_revision_id FROM documents WHERE document_id = %s
+                  )
+                """,
+                (new_vault_path, document_id, document_id),
+            )
+            if result.rowcount != 1:
+                return False
+            connection.execute(
+                "DELETE FROM pending_topic_filings WHERE document_id = %s",
+                (document_id,),
+            )
+            move()
+        return True
 
     def ensure_projection_generation(
         self,

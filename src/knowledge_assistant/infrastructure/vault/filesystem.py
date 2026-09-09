@@ -153,6 +153,44 @@ class FileSystemVaultRepository:
             found = candidate
         return found
 
+    def topic_names(self) -> tuple[str, ...]:
+        """Union of topic folders beneath Articles/<provider>/, sorted."""
+
+        articles = self._root / "Articles"
+        if not articles.is_dir():
+            return ()
+        names: set[str] = set()
+        for provider_dir in articles.iterdir():
+            if not provider_dir.is_dir() or provider_dir.is_symlink():
+                continue
+            for topic_dir in provider_dir.iterdir():
+                if (
+                    topic_dir.is_dir()
+                    and not topic_dir.is_symlink()
+                    and not topic_dir.name.startswith("_")
+                ):
+                    names.add(topic_dir.name)
+        return tuple(sorted(names))
+
+    def move_document(
+        self,
+        current_path: PurePosixPath,
+        new_path: PurePosixPath,
+    ) -> None:
+        """Atomically rename one canonical document within the vault."""
+
+        source = self._safe_document_target(current_path)
+        target = self._safe_document_target(new_path)
+        if target.exists():
+            raise DocumentConflictError(f"{new_path} already exists")
+        if not source.exists():
+            raise DocumentNotFoundError(str(current_path))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self._reject_symlink_chain(target.parent)
+        os.replace(source, target)
+        self._fsync_directory(target.parent)
+        self._fsync_directory(source.parent)
+
     def delete(self, stored: StoredKnowledgeDocument) -> None:
         """Delete one unchanged canonical document and all of its managed assets."""
 

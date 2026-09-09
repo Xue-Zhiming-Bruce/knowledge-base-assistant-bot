@@ -122,6 +122,11 @@ WORKDIR /app
 COPY --from=builder --chown=knowledge-assistant:knowledge-assistant /opt/venv /opt/venv
 COPY --from=tempo-tools /tempo-build/.tempo/bin/tempo-request /usr/local/bin/tempo-request
 COPY --from=tempo-tools /tempo-build/.tempo/bin/tempo-wallet /usr/local/bin/tempo-wallet
+# tempo-wallet's interactive auth tries to spawn a browser and crashes when
+# xdg-open is missing. A no-op shim lets `tempo-wallet refresh` print its auth
+# URL and keep polling, so key renewal is: run refresh, click the printed URL.
+RUN printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/xdg-open \
+    && chmod +x /usr/local/bin/xdg-open
 
 USER knowledge-assistant
 

@@ -343,6 +343,9 @@ class FakeWorkerRepository:
     def register_document(self, **_kwargs: object) -> None:
         self.registered = True
 
+    def record_pending_filing(self, **_kwargs: object) -> None:
+        return None
+
     def ensure_projection_generation(self, **_kwargs: object) -> uuid.UUID:
         return uuid.uuid4()
 

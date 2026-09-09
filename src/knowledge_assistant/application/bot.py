@@ -8,6 +8,7 @@ import threading
 from uuid import uuid4
 
 from knowledge_assistant.application.deletion import ArticleDeletionService
+from knowledge_assistant.application.filings import TopicFilingService
 from knowledge_assistant.application.questions import QuestionService
 from knowledge_assistant.domain.sources import SourceClassifier, UnsupportedSourceError
 from knowledge_assistant.infrastructure.postgres.ingestion_repository import (
@@ -16,6 +17,7 @@ from knowledge_assistant.infrastructure.postgres.ingestion_repository import (
 from knowledge_assistant.infrastructure.telegram.client import (
     TelegramApiError,
     TelegramClient,
+    TelegramMessage,
     TelegramUpdate,
 )
 
@@ -41,6 +43,7 @@ class TelegramPollingService:
         poll_timeout_seconds: int,
         questions: QuestionService | None = None,
         deletions: ArticleDeletionService | None = None,
+        filings: TopicFilingService | None = None,
         instance_id: str | None = None,
     ) -> None:
         self._telegram = telegram
@@ -50,6 +53,7 @@ class TelegramPollingService:
         self._poll_timeout_seconds = poll_timeout_seconds
         self._questions = questions
         self._deletions = deletions
+        self._filings = filings
         self._instance_id = instance_id or f"bot-{uuid4()}"
         self._stop = threading.Event()
         self._logger = logging.getLogger(__name__)
@@ -59,11 +63,20 @@ class TelegramPollingService:
 
     def run_forever(self) -> None:
         offset = self._repository.get_checkpoint("update_offset")
+        if self._filings is not None:
+            # Re-ask every unresolved filing after a restart so nothing gets
+            # silently lost when a question message scrolls away.
+            self._repository.requeue_pending_filings()
         failure_delay = 1.0
         while not self._stop.is_set():
             self._repository.heartbeat(role="bot", instance_id=self._instance_id)
             if self._questions is not None:
                 self._questions.cleanup_expired()
+            if self._filings is not None:
+                try:
+                    self._filings.notify_pending()
+                except Exception:
+                    self._logger.exception("filing_notification_cycle_failed")
             try:
                 updates = self._telegram.get_updates(
                     offset=offset,
@@ -79,6 +92,27 @@ class TelegramPollingService:
                 self.process_update(update)
                 offset = update.update_id + 1
                 self._repository.set_checkpoint("update_offset", offset)
+
+    def _handle_topic_command(self, message: TelegramMessage) -> str:
+        if self._filings is None:
+            return "Topic filing is not configured."
+        if message.reply_to_message_id is None:
+            return "Reply to the filing question with /topic <name>, or /topic new <Name>."
+        filing = self._repository.find_pending_filing_by_question_message(
+            str(message.reply_to_message_id)
+        )
+        if filing is None:
+            return "That message is not an open filing question."
+        parts = message.text.strip().split(maxsplit=2)
+        if len(parts) < 2 or not parts[1]:
+            return "Usage: /topic <name> or /topic new <Name>."
+        if parts[1].lower() == "new" and len(parts) == 3:
+            topic = parts[2]
+        elif parts[1].lower() == "new":
+            return "Usage: /topic new <Name>."
+        else:
+            topic = parts[1]
+        return self._filings.resolve(filing, topic)
 
     def process_update(self, update: TelegramUpdate) -> None:
         message = update.message
@@ -151,6 +185,14 @@ class TelegramPollingService:
                         update.update_id,
                     )
                     response = "I couldn't delete that article safely. Nothing was deleted."
+            self._telegram.send_message(
+                chat_id=message.chat_id,
+                text=response,
+                reply_to_message_id=message.message_id,
+            )
+            return
+        if command == "/topic":
+            response = self._handle_topic_command(message)
             self._telegram.send_message(
                 chat_id=message.chat_id,
                 text=response,

@@ -57,6 +57,7 @@ def test_initial_migration_contains_operational_and_rag_schema() -> None:
         "0006_remove_learned_sparse_embeddings",
         "0007_answer_feedback",
         "0008_feedback_durable",
+            "0009_topic_filing",
     ]
     sql = migrations[0].sql
     for required_fragment in (
@@ -101,6 +102,7 @@ def test_migration_runner_applies_pending_migration(
         "0006_remove_learned_sparse_embeddings",
         "0007_answer_feedback",
         "0008_feedback_durable",
+            "0009_topic_filing",
     )
     assert any("pg_advisory_xact_lock" in statement for statement in connection.statements)
     assert any("CREATE TABLE documents" in statement for statement in connection.statements)

@@ -33,6 +33,7 @@ from knowledge_assistant.application.evaluation import (
     sample_cases_to_dataset,
     write_jsonl,
 )
+from knowledge_assistant.application.filings import TopicFilingService
 from knowledge_assistant.application.projections import ProjectionRebuildService
 from knowledge_assistant.application.questions import QuestionService
 from knowledge_assistant.application.retrieval import RetrievalOrchestrator
@@ -82,6 +83,7 @@ from knowledge_assistant.infrastructure.openai.evaluation import (
     OpenAISyntheticQuestionNaturalizer,
 )
 from knowledge_assistant.infrastructure.openai.planning import OpenAIQueryPlanner
+from knowledge_assistant.infrastructure.openai.topic_classifier import OpenAITopicClassifier
 from knowledge_assistant.infrastructure.postgres.evaluation_repository import (
     PostgresEvaluationRepository,
 )
@@ -501,6 +503,7 @@ def _run_bot(settings: Settings) -> int:
         retrieval_strategy=settings.retrieval_strategy,
         telemetry=telemetry,
     )
+    vault = FileSystemVaultRepository(settings.vault_path)
     service = TelegramPollingService(
         telegram=TelegramClient(token=settings.telegram_token),
         repository=repository,
@@ -508,9 +511,11 @@ def _run_bot(settings: Settings) -> int:
         allowed_user_ids=settings.telegram_allowed_user_ids,
         poll_timeout_seconds=settings.telegram_poll_timeout_seconds,
         questions=questions,
-        deletions=ArticleDeletionService(
-            registry=repository,
-            vault=FileSystemVaultRepository(settings.vault_path),
+        deletions=ArticleDeletionService(registry=repository, vault=vault),
+        filings=TopicFilingService(
+            telegram=TelegramClient(token=settings.telegram_token),
+            repository=repository,
+            vault=vault,
         ),
     )
     _install_signal_handlers(service.stop)
@@ -562,6 +567,14 @@ def _run_worker(settings: Settings) -> int:
         embeddings=OpenAIEmbeddingProvider(
             api_key=settings.openai_api_key,
             model=settings.embedding_model,
+        ),
+        topic_classifier=(
+            OpenAITopicClassifier(
+                api_key=settings.openai_api_key,
+                model=settings.generation_model,
+            )
+            if settings.generation_model is not None
+            else None
         ),
         telegram=(
             TelegramClient(token=settings.telegram_token)

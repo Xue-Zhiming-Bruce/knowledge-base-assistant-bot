@@ -49,5 +49,15 @@ class VaultRepository(Protocol):
     def find_by_document_id(self, document_id: DocumentId) -> StoredKnowledgeDocument | None:
         """Find a managed document by stable identity."""
 
+    def topic_names(self) -> tuple[str, ...]:
+        """List the union of topic folders across all provider folders."""
+
+    def move_document(
+        self,
+        current_path: PurePosixPath,
+        new_path: PurePosixPath,
+    ) -> None:
+        """Rename one canonical document within the vault, keeping content."""
+
     def delete(self, stored: StoredKnowledgeDocument) -> None:
         """Delete a previously read document and its managed assets if unchanged."""

@@ -32,6 +32,7 @@ from knowledge_assistant.domain.sources import (
     SourceFetchError,
 )
 from knowledge_assistant.infrastructure.extraction.article import ArticleExtractor
+from knowledge_assistant.infrastructure.openai.topic_classifier import OpenAITopicClassifier
 from knowledge_assistant.infrastructure.postgres.ingestion_repository import (
     ClaimedJob,
     PostgresIngestionRepository,
@@ -57,6 +58,7 @@ class IngestionWorker:
         vault: VaultRepository,
         chunker: MarkdownChunker,
         embeddings: EmbeddingProvider,
+        topic_classifier: OpenAITopicClassifier | None = None,
         telegram: TelegramClient | None = None,
         poll_seconds: float,
         instance_id: str | None = None,
@@ -70,6 +72,7 @@ class IngestionWorker:
         self._vault = vault
         self._chunker = chunker
         self._embeddings = embeddings
+        self._topic_classifier = topic_classifier
         self._telegram = telegram
         self._poll_seconds = poll_seconds
         self._instance_id = instance_id or f"worker-{uuid4()}"
@@ -129,11 +132,17 @@ class IngestionWorker:
                 source.normalized_source_key
             ) or DocumentId.derive_from_source(source.normalized_source_key)
             existing = self._vault.find_by_document_id(document_id)
-            vault_path = (
-                existing.vault_path
-                if existing is not None
-                else self._vault_path(source.provider.value, article.title, document_id)
-            )
+            if existing is not None:
+                vault_path = existing.vault_path
+                topic: str | None = None
+            else:
+                topic = self._choose_topic(source.provider, article.title, article.markdown)
+                vault_path = self._vault_path(
+                    source.provider.value,
+                    article.title,
+                    document_id,
+                    topic=topic,
+                )
             materialized = self._asset_materializer.materialize(
                 article,
                 document_id=document_id,
@@ -179,6 +188,14 @@ class IngestionWorker:
                 ),
             )
             self._repository.register_document(source=source, stored=stored)
+            if topic is None and existing is None:
+                self._repository.record_pending_filing(
+                    job_id=job.job_id,
+                    document_id=document_id,
+                    title=article.title,
+                    provider=source.provider.value,
+                    pending_vault_path=vault_path.as_posix(),
+                )
             self._repository.transition(
                 job.job_id,
                 expected=IngestionState.COMMITTING,
@@ -299,12 +316,36 @@ class IngestionWorker:
         provider: str,
         title: str,
         document_id: DocumentId,
+        topic: str | None = None,
     ) -> PurePosixPath:
         ascii_title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
         slug = re.sub(r"[^a-z0-9]+", "-", ascii_title.lower()).strip("-")[:80]
         slug = slug or "untitled"
-        return PurePosixPath(
-            "Articles",
-            provider,
-            f"{slug}-{document_id.value[-8:]}.md",
-        )
+        filename = f"{slug}-{document_id.value[-8:]}.md"
+        if topic is None:
+            return PurePosixPath("Articles", provider, "_Pending", filename)
+        return PurePosixPath("Articles", provider, topic, filename)
+
+    def _choose_topic(
+        self,
+        provider: SourceProvider,
+        article_title: str,
+        markdown: str,
+    ) -> str | None:
+        """Pick an existing vault topic, or None to file as pending.
+
+        Classification failure degrades to a pending filing rather than
+        failing ingestion: the article is still saved and can be filed later.
+        """
+
+        if self._topic_classifier is None:
+            return None
+        try:
+            return self._topic_classifier.classify(
+                title=article_title,
+                content_excerpt=markdown[:4000],
+                topics=self._vault.topic_names(),
+            )
+        except Exception:
+            self._logger.exception("topic_classification_failed provider=%s", provider.value)
+            return None
