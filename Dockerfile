@@ -16,18 +16,26 @@ ARG TEMPO_REQUEST_VERSION
 
 ENV HOME=/tempo-build
 
-RUN apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 install \
-        --yes --no-install-recommends ca-certificates curl gnupg \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN curl --fail --silent --show-error --location \
-        --retry 5 --retry-all-errors \
-        https://tempo.xyz/install --output /tmp/install-tempo
-
-RUN bash /tmp/install-tempo --install "${TEMPO_VERSION}" \
-    && /tempo-build/.tempo/bin/tempo add wallet "${TEMPO_WALLET_VERSION}" \
-    && /tempo-build/.tempo/bin/tempo add request "${TEMPO_REQUEST_VERSION}"
+# docker/tempo holds pre-downloaded binaries when they are present, which keeps
+# local builds fast and offline-safe. A clean clone only has the .gitkeep, so
+# fall back to the upstream installer instead of failing at COPY. Re-vendor with
+# `docker create` + `docker cp` from an image that already has them.
+COPY docker/tempo /tempo-build/.tempo/bin
+RUN set -eux; \
+    if [ ! -x /tempo-build/.tempo/bin/tempo-request ]; then \
+        apt-get -o Acquire::Retries=3 update; \
+        apt-get -o Acquire::Retries=3 install \
+            --yes --no-install-recommends ca-certificates curl gnupg; \
+        rm -rf /var/lib/apt/lists/*; \
+        curl --fail --silent --show-error --location \
+            --retry 5 --retry-all-errors \
+            https://tempo.xyz/install --output /tmp/install-tempo; \
+        bash /tmp/install-tempo --install "${TEMPO_VERSION}"; \
+        /tempo-build/.tempo/bin/tempo add wallet "${TEMPO_WALLET_VERSION}"; \
+        /tempo-build/.tempo/bin/tempo add request "${TEMPO_REQUEST_VERSION}"; \
+    fi; \
+    chmod +x /tempo-build/.tempo/bin/tempo-request \
+             /tempo-build/.tempo/bin/tempo-wallet
 
 FROM python:${PYTHON_VERSION}-slim-trixie AS builder
 
@@ -55,7 +63,9 @@ ENV COVERAGE_FILE=/tmp/.coverage \
 COPY tests ./tests
 COPY data ./data
 COPY Dockerfile compose.yaml .dockerignore ./
-
+# The segmented-transcription tests need ffmpeg; without it they skip silently.
+# The segmented-transcription tests need ffmpeg; without it they skip silently.
+COPY --from=mwader/static-ffmpeg:7.1 /ffmpeg /usr/local/bin/ffmpeg
 RUN uv sync --frozen --extra dev --extra orchestration --no-editable
 
 CMD ["pytest", "--cov=knowledge_assistant", "--cov-report=term-missing", "-q"]
@@ -120,6 +130,8 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=builder --chown=knowledge-assistant:knowledge-assistant /opt/venv /opt/venv
+# Static ffmpeg for podcast audio segmentation (avoids a large apt install).
+COPY --from=mwader/static-ffmpeg:7.1 /ffmpeg /usr/local/bin/ffmpeg
 COPY --from=tempo-tools /tempo-build/.tempo/bin/tempo-request /usr/local/bin/tempo-request
 COPY --from=tempo-tools /tempo-build/.tempo/bin/tempo-wallet /usr/local/bin/tempo-wallet
 # tempo-wallet's interactive auth tries to spawn a browser and crashes when

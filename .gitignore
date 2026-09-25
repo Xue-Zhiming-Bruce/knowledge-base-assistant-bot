@@ -33,3 +33,7 @@ var/
 # Local agent/working files
 AGENTS.md
 requirements.md
+# Vendored tempo binaries (see Dockerfile: docker/tempo is optional and the
+# build falls back to the upstream installer). Keep the directory itself.
+docker/tempo/*
+!docker/tempo/.gitkeep

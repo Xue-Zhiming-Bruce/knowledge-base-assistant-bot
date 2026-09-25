@@ -6,7 +6,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qs, parse_qsl, urlencode, urlsplit, urlunsplit
 
 from knowledge_assistant.domain.documents import SourceProvider, SourceType
 from knowledge_assistant.domain.errors import DomainError
@@ -30,6 +30,9 @@ _X_HOSTS = {
 _X_STATUS_PATH = re.compile(
     r"^/(?:[A-Za-z0-9_]{1,50}/status|i/(?:web/)?status)/([0-9]{1,19})(?:/.*)?$"
 )
+_XIAOYUZHOU_HOSTS = {"xiaoyuzhoufm.com", "www.xiaoyuzhoufm.com"}
+_XIAOYUZHOU_EPISODE_PATH = re.compile(r"^/episode/([0-9a-fA-F]{24})(?:/.*)?$")
+_APPLE_PODCASTS_HOSTS = {"podcasts.apple.com"}
 
 
 class UnsupportedSourceError(DomainError):
@@ -103,6 +106,37 @@ class SourceClassifier:
         if parsed.username or parsed.password:
             raise UnsupportedSourceError("URLs containing credentials are not supported.")
 
+        if hostname in _XIAOYUZHOU_HOSTS:
+            episode_match = _XIAOYUZHOU_EPISODE_PATH.fullmatch(parsed.path)
+            if episode_match is None:
+                raise UnsupportedSourceError(
+                    "Send a Xiaoyuzhou episode link like "
+                    "https://www.xiaoyuzhoufm.com/episode/<episode-id>."
+                )
+            episode_id = episode_match.group(1).lower()
+            canonical_url = f"https://www.xiaoyuzhoufm.com/episode/{episode_id}"
+            return ClassifiedSource(
+                original_url=url,
+                canonical_url=canonical_url,
+                normalized_source_key=f"podcast:xiaoyuzhou:{episode_id}",
+                source_type=SourceType.PODCAST,
+                provider=SourceProvider.PODCAST,
+            )
+        if hostname in _APPLE_PODCASTS_HOSTS:
+            episode_id = parse_qs(parsed.query).get("i", [None])[0]
+            if episode_id is None or not episode_id.isdigit():
+                raise UnsupportedSourceError(
+                    "Send an Apple Podcasts episode link containing ?i=<episode-id>, "
+                    "not a show link."
+                )
+            canonical_url = self._canonicalize(parsed)
+            return ClassifiedSource(
+                original_url=url,
+                canonical_url=canonical_url,
+                normalized_source_key=f"podcast:apple:{episode_id}",
+                source_type=SourceType.PODCAST,
+                provider=SourceProvider.PODCAST,
+            )
         if hostname in _X_HOSTS:
             status_match = _X_STATUS_PATH.fullmatch(parsed.path)
             if status_match is None:

@@ -51,6 +51,7 @@ class Settings:
     openai_api_key: str | None
     generation_model: str | None
     embedding_model: str | None
+    transcription_model: str
     x_article_provider: XArticleProviderName
     xquik_api_key: str | None
     xquik_mpp_max_spend_usdc: Decimal
@@ -158,6 +159,7 @@ class Settings:
             openai_api_key=environ.get("OPENAI_API_KEY") or None,
             generation_model=environ.get(f"{prefix}GENERATION_MODEL") or None,
             embedding_model=environ.get(f"{prefix}EMBEDDING_MODEL") or None,
+            transcription_model=environ.get(f"{prefix}TRANSCRIPTION_MODEL", "gpt-transcribe"),
             x_article_provider=x_article_provider,
             xquik_api_key=environ.get(f"{prefix}XQUIK_API_KEY") or None,
             xquik_mpp_max_spend_usdc=xquik_mpp_max_spend_usdc,
@@ -179,6 +181,7 @@ class Settings:
             "openai_configured": self.openai_api_key is not None,
             "generation_model_configured": self.generation_model is not None,
             "embedding_model_configured": self.embedding_model is not None,
+            "transcription_model": self.transcription_model,
             "x_article_provider": self.x_article_provider.value,
             "xquik_configured": self.xquik_api_key is not None,
             "xquik_mpp_max_spend_usdc": str(self.xquik_mpp_max_spend_usdc),

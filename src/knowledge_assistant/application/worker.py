@@ -16,6 +16,7 @@ import httpx
 from openai import APIConnectionError, APITimeoutError, InternalServerError, RateLimitError
 
 from knowledge_assistant.application.assets import ArticleAssetMaterializer
+from knowledge_assistant.application.podcasts import PodcastService
 from knowledge_assistant.domain.chunks import MarkdownChunker
 from knowledge_assistant.domain.documents import (
     DocumentId,
@@ -26,7 +27,9 @@ from knowledge_assistant.domain.documents import (
 )
 from knowledge_assistant.domain.errors import DocumentConflictError
 from knowledge_assistant.domain.ingestion import IngestionState
+from knowledge_assistant.domain.podcasts import PodcastEpisode
 from knowledge_assistant.domain.sources import (
+    ClassifiedSource,
     ExtractionError,
     SourceClassifier,
     SourceFetchError,
@@ -60,6 +63,7 @@ class IngestionWorker:
         embeddings: EmbeddingProvider,
         topic_classifier: OpenAITopicClassifier | None = None,
         telegram: TelegramClient | None = None,
+        podcast: PodcastService | None = None,
         poll_seconds: float,
         instance_id: str | None = None,
         telemetry: Telemetry | None = None,
@@ -74,6 +78,7 @@ class IngestionWorker:
         self._embeddings = embeddings
         self._topic_classifier = topic_classifier
         self._telegram = telegram
+        self._podcast = podcast
         self._poll_seconds = poll_seconds
         self._instance_id = instance_id or f"worker-{uuid4()}"
         self._telemetry = telemetry or NoOpTelemetry()
@@ -116,13 +121,31 @@ class IngestionWorker:
     def _process_job(self, job: ClaimedJob) -> None:
         try:
             source = self._classifier.classify(job.source_url)
-            fetched = self._fetcher.fetch(source)
-            self._repository.transition(
-                job.job_id,
-                expected=IngestionState.FETCHING,
-                target=IngestionState.EXTRACTING,
-            )
-            article = self._extractors[source.provider].extract(fetched)
+            episode = self._select_podcast_episode(job, source)
+            if episode is not None:
+                assert self._podcast is not None
+                self._repository.transition(
+                    job.job_id,
+                    expected=IngestionState.FETCHING,
+                    target=IngestionState.EXTRACTING,
+                )
+                article = self._podcast.transcribe(episode, source.canonical_url)
+                extractor_name = self._podcast.extractor_label
+                extractor_version = f"transcript-{self._podcast.transcriber_model}"
+            else:
+                fetched = self._fetcher.fetch(source)
+                self._repository.transition(
+                    job.job_id,
+                    expected=IngestionState.FETCHING,
+                    target=IngestionState.EXTRACTING,
+                )
+                article = self._extractors[source.provider].extract(fetched)
+                extractor_name = None
+                extractor_version = (
+                    f"xquik-article+markdownify-{version('markdownify')}"
+                    if source.provider is SourceProvider.X
+                    else version("markdownify")
+                )
             self._repository.transition(
                 job.job_id,
                 expected=IngestionState.EXTRACTING,
@@ -138,10 +161,11 @@ class IngestionWorker:
             else:
                 topic = self._choose_topic(source.provider, article.title, article.markdown)
                 vault_path = self._vault_path(
-                    source.provider.value,
+                    self._vault_folder(source, podcast=episode is not None),
                     article.title,
                     document_id,
                     topic=topic,
+                    root="Podcasts" if episode is not None else "Articles",
                 )
             materialized = self._asset_materializer.materialize(
                 article,
@@ -159,12 +183,8 @@ class IngestionWorker:
                 authors=article.authors,
                 published_at=article.published_at,
                 ingestion=IngestionProvenance(
-                    extractor=f"{source.provider.value}-markdownify",
-                    extractor_version=(
-                        f"xquik-article+markdownify-{version('markdownify')}"
-                        if source.provider is SourceProvider.X
-                        else version("markdownify")
-                    ),
+                    extractor=extractor_name or f"{source.provider.value}-markdownify",
+                    extractor_version=extractor_version,
                     normalizer_version="markdown-assets-v6",
                 ),
                 assets=materialized.metadata,
@@ -311,20 +331,57 @@ class IngestionWorker:
             ),
         ) and not isinstance(error, (ExtractionError, DocumentConflictError))
 
+    def _select_podcast_episode(
+        self, job: ClaimedJob, source: ClassifiedSource
+    ) -> PodcastEpisode | None:
+        """Return a PodcastEpisode when this job should take the podcast path."""
+
+        if self._podcast is None:
+            if source.provider is SourceProvider.PODCAST:
+                raise SourceFetchError(
+                    "Podcast ingestion is not configured on this worker.",
+                    retryable=False,
+                )
+            return None
+        if source.provider is SourceProvider.PODCAST:
+            return self._podcast.resolve(source)
+        if source.provider is SourceProvider.SUBSTACK:
+            episode = self._podcast.probe_substack(source)
+            if episode is not None:
+                # Podcast transcription outlives the normal article lease.
+                self._repository.mark_podcast_job(job.job_id)
+            return episode
+        return None
+
+    @staticmethod
+    def _vault_folder(source: ClassifiedSource, *, podcast: bool) -> str:
+        """Provider segment of the vault path: platform name for podcasts."""
+
+        if not podcast:
+            return source.provider.value
+        key = source.normalized_source_key
+        if key.startswith("podcast:xiaoyuzhou:"):
+            return "xiaoyuzhou"
+        if key.startswith("podcast:apple:"):
+            return "apple-podcasts"
+        return source.provider.value
+
     @staticmethod
     def _vault_path(
         provider: str,
         title: str,
         document_id: DocumentId,
         topic: str | None = None,
+        *,
+        root: str = "Articles",
     ) -> PurePosixPath:
         ascii_title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
         slug = re.sub(r"[^a-z0-9]+", "-", ascii_title.lower()).strip("-")[:80]
         slug = slug or "untitled"
         filename = f"{slug}-{document_id.value[-8:]}.md"
         if topic is None:
-            return PurePosixPath("Articles", provider, "_Pending", filename)
-        return PurePosixPath("Articles", provider, topic, filename)
+            return PurePosixPath(root, provider, "_Pending", filename)
+        return PurePosixPath(root, provider, topic, filename)
 
     def _choose_topic(
         self,

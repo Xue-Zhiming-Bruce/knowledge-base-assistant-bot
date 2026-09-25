@@ -15,6 +15,7 @@ from uuid import UUID
 
 import psycopg
 from dotenv import load_dotenv
+from openai import OpenAI
 
 from knowledge_assistant.application.assets import ArticleAssetMaterializer
 from knowledge_assistant.application.bot import TelegramPollingService
@@ -34,6 +35,7 @@ from knowledge_assistant.application.evaluation import (
     write_jsonl,
 )
 from knowledge_assistant.application.filings import TopicFilingService
+from knowledge_assistant.application.podcasts import PodcastService
 from knowledge_assistant.application.projections import ProjectionRebuildService
 from knowledge_assistant.application.questions import QuestionService
 from knowledge_assistant.application.retrieval import RetrievalOrchestrator
@@ -61,6 +63,10 @@ from knowledge_assistant.infrastructure.extraction.article import (
 from knowledge_assistant.infrastructure.http.medium_feed_fallback import (
     MediumFeedFallbackFetcher,
 )
+from knowledge_assistant.infrastructure.http.podcast_resolver import (
+    PodcastAudioDownloader,
+    PodcastEpisodeResolver,
+)
 from knowledge_assistant.infrastructure.http.provider_router import ProviderSourceFetcher
 from knowledge_assistant.infrastructure.http.safe_fetcher import SafeHttpFetcher
 from knowledge_assistant.infrastructure.http.safe_image_fetcher import SafeImageFetcher
@@ -84,6 +90,7 @@ from knowledge_assistant.infrastructure.openai.evaluation import (
 )
 from knowledge_assistant.infrastructure.openai.planning import OpenAIQueryPlanner
 from knowledge_assistant.infrastructure.openai.topic_classifier import OpenAITopicClassifier
+from knowledge_assistant.infrastructure.openai.transcription import OpenAITranscriber
 from knowledge_assistant.infrastructure.postgres.evaluation_repository import (
     PostgresEvaluationRepository,
 )
@@ -544,6 +551,16 @@ def _run_worker(settings: Settings) -> int:
         article_provider = TempoXquikArticleProvider(
             max_spend_usdc=settings.xquik_mpp_max_spend_usdc,
         )
+    transcription_client = OpenAI(api_key=settings.openai_api_key)
+    podcast_service = PodcastService(
+        resolver=PodcastEpisodeResolver(),
+        downloader=PodcastAudioDownloader(),
+        transcriber=OpenAITranscriber(
+            client=transcription_client,
+            model=settings.transcription_model,
+        ),
+        transcriber_model=settings.transcription_model,
+    )
     service = IngestionWorker(
         repository=repository,
         classifier=SourceClassifier(),
@@ -576,6 +593,7 @@ def _run_worker(settings: Settings) -> int:
             if settings.generation_model is not None
             else None
         ),
+        podcast=podcast_service,
         telegram=(
             TelegramClient(token=settings.telegram_token)
             if settings.telegram_token is not None

@@ -154,22 +154,23 @@ class FileSystemVaultRepository:
         return found
 
     def topic_names(self) -> tuple[str, ...]:
-        """Union of topic folders beneath Articles/<provider>/, sorted."""
+        """Union of topic folders beneath Articles/ and Podcasts/, sorted."""
 
-        articles = self._root / "Articles"
-        if not articles.is_dir():
-            return ()
         names: set[str] = set()
-        for provider_dir in articles.iterdir():
-            if not provider_dir.is_dir() or provider_dir.is_symlink():
+        for root_name in ("Articles", "Podcasts"):
+            root = self._root / root_name
+            if not root.is_dir():
                 continue
-            for topic_dir in provider_dir.iterdir():
-                if (
-                    topic_dir.is_dir()
-                    and not topic_dir.is_symlink()
-                    and not topic_dir.name.startswith("_")
-                ):
-                    names.add(topic_dir.name)
+            for provider_dir in root.iterdir():
+                if not provider_dir.is_dir() or provider_dir.is_symlink():
+                    continue
+                for topic_dir in provider_dir.iterdir():
+                    if (
+                        topic_dir.is_dir()
+                        and not topic_dir.is_symlink()
+                        and not topic_dir.name.startswith("_")
+                    ):
+                        names.add(topic_dir.name)
         return tuple(sorted(names))
 
     def move_document(

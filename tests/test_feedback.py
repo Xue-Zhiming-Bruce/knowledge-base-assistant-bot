@@ -759,6 +759,6 @@ def test_bot_submits_source_url_and_help_paths() -> None:
         questions=cast(Any, inactive),
     )
     help_bot.process_update(bot_update("hello there"))
-    assert "Send a Medium, Substack, X Article, or blog article URL" in cast(
+    assert "Send an article URL (Medium, Substack, X Article, blog) or a podcast" in cast(
         FakeBotTelegram, help_bot._telegram
     ).sent[0]

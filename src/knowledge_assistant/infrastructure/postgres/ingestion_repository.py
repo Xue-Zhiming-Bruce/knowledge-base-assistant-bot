@@ -208,7 +208,11 @@ class PostgresIngestionRepository:
                 UPDATE ingestion_jobs
                 SET state = 'fetching',
                     lease_owner = %s,
-                    lease_expires_at = now() + (%s * interval '1 second'),
+                    lease_expires_at = now()
+                        + (%s * CASE
+                               WHEN source_provider = 'podcast' OR source_type = 'podcast'
+                               THEN 60 ELSE 1 END
+                           * interval '1 second'),
                     attempt_count = attempt_count + 1,
                     updated_at = now(),
                     error_class = NULL,
@@ -250,6 +254,19 @@ class PostgresIngestionRepository:
                 raise RuntimeError(
                     f"job {job_id} did not transition from {expected.value} to {target.value}"
                 )
+
+    def mark_podcast_job(self, job_id: uuid.UUID) -> None:
+        """Reclassify a claimed job as podcast so it gets a long transcription lease."""
+
+        with self._pool.connection() as connection:
+            connection.execute(
+                """
+                UPDATE ingestion_jobs
+                SET source_provider = 'podcast', source_type = 'podcast'
+                WHERE job_id = %s
+                """,
+                (job_id,),
+            )
 
     def find_document_id(self, normalized_source_key: str) -> DocumentId | None:
         with self._pool.connection() as connection:
