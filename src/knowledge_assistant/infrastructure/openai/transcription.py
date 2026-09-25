@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
@@ -37,12 +38,22 @@ _SUPPORTED_EXTENSIONS = {
     "audio/x-wav": "audio.wav",
     "audio/webm": "audio.webm",
 }
-# ponytail: fixed 10-minute segments cut mid-word at boundaries occasionally.
-# Upgrade to silence-aware splitting (silencedetect) if boundary loss matters.
+# Nominal segment length. Real cut points are nudged onto pauses by
+# ``_cut_points``; this is only the grid they are allowed to drift around.
 _SEGMENT_SECONDS = 600
+# How far a cut may drift from its grid mark, so segments stay 9m30s-10m30s.
+_CUT_WINDOW_SECONDS = 30.0
+# Audio quieter than this for at least this long counts as a pause. Length is
+# the only evidence a gap is a sentence boundary rather than a breath, so the
+# longest pause near each mark wins over merely the nearest one.
+_PAUSE_NOISE_DB = -35
+_MIN_PAUSE_SECONDS = 0.4
 # A transient failure on segment N must not throw away segments 0..N-1: the
 # job-level retry re-downloads the audio and transcribes from segment 0 again.
 _SEGMENT_ATTEMPTS = 3
+# Segments are independent requests. Three in flight keeps wall-clock near
+# 1/3 of sequential without stampeding a marginal uplink.
+_MAX_PARALLEL_SEGMENTS = 3
 
 
 def _detected_language(response: Any) -> str | None:
@@ -64,9 +75,61 @@ def _detected_language(response: Any) -> str | None:
         if code:
             return str(code).strip().lower()
     return None
-# Segments are independent requests. Three in flight keeps wall-clock near
-# 1/3 of sequential without stampeding a marginal uplink.
-_MAX_PARALLEL_SEGMENTS = 3
+
+
+def _format_marker(seconds: float) -> str:
+    total = int(seconds)
+    return f"[{total // 3600:02d}:{(total // 60) % 60:02d}]"
+
+
+def _parse_media_duration(stderr: str) -> float | None:
+    """Duration ffmpeg reports for its input, or None when it is unknown."""
+    match = re.search(r"Duration: (\d+):(\d+):([\d.]+)", stderr)
+    if match is None:
+        return None
+    return int(match.group(1)) * 3600 + int(match.group(2)) * 60 + float(match.group(3))
+
+
+def _parse_pauses(stderr: str) -> tuple[tuple[float, float], ...]:
+    """Quiet stretches from a ``silencedetect`` run, as (start, end) seconds."""
+    starts = [float(value) for value in re.findall(r"silence_start: ([\d.]+)", stderr)]
+    ends = [float(value) for value in re.findall(r"silence_end: ([\d.]+)", stderr)]
+    return tuple(
+        (start, end) for start, end in zip(starts, ends, strict=False) if end > start
+    )
+
+
+def _cut_points(
+    pauses: tuple[tuple[float, float], ...],
+    duration: float,
+    *,
+    segment_seconds: float,
+    window_seconds: float,
+) -> tuple[float, ...]:
+    """Move each grid mark onto the longest pause within ``window_seconds`` of it.
+
+    A mark with no usable pause nearby keeps its exact grid position, so audio
+    with no detectable pauses splits exactly as the fixed grid would.
+    """
+    # Windows must not overlap, or a single pause can be claimed by two marks and
+    # the later mark is then dropped by the ascending guard below.
+    window = min(window_seconds, segment_seconds / 4)
+    cuts: list[float] = []
+    for mark in range(int(segment_seconds), int(duration), int(segment_seconds)):
+        nearby = [
+            pause
+            for pause in pauses
+            if abs((pause[0] + pause[1]) / 2 - mark) <= window
+        ]
+        if nearby:
+            longest = max(nearby, key=lambda pause: pause[1] - pause[0])
+            point = (longest[0] + longest[1]) / 2
+        else:
+            point = float(mark)
+        # Strictly ascending: ffmpeg rejects any other ordering.
+        if point > 0 and (not cuts or point > cuts[-1]):
+            cuts.append(point)
+    return tuple(cuts)
 # Retrying a malformed-upload 400 is deliberate: an interrupted multipart body
 # surfaces as "something went wrong reading your request", not as a network error.
 _RETRYABLE = (
@@ -118,6 +181,22 @@ class OpenAITranscriber:
             work = Path(tmp)
             raw_input = work / "input"
             raw_input.write_bytes(audio)
+            pauses, duration = self._pause_report(raw_input)
+            cuts = (
+                _cut_points(
+                    pauses,
+                    duration,
+                    segment_seconds=self._segment_seconds,
+                    window_seconds=_CUT_WINDOW_SECONDS,
+                )
+                if duration is not None
+                else ()
+            )
+            split = (
+                ("-segment_times", ",".join(f"{cut:.3f}" for cut in cuts))
+                if cuts
+                else ("-segment_time", str(self._segment_seconds))
+            )
             command = [
                 self._ffmpeg_path,
                 "-nostdin",
@@ -134,8 +213,7 @@ class OpenAITranscriber:
                 "64k",
                 "-f",
                 "segment",
-                "-segment_time",
-                str(self._segment_seconds),
+                *split,
                 "-reset_timestamps",
                 "1",
                 str(work / "seg%04d.mp3"),
@@ -154,42 +232,84 @@ class OpenAITranscriber:
             parts = sorted(work.glob("seg*.mp3"))
             if not parts:
                 raise ExtractionError("ffmpeg produced no audio segments.")
+            # Offsets come from the cut times we asked for, never from a naive
+            # index * segment_seconds, which would be wrong for nudged cuts.
+            offsets = (
+                (0.0, *cuts)
+                if cuts
+                else tuple(
+                    float(index * self._segment_seconds)
+                    for index in range(len(parts))
+                )
+            )
+            if len(offsets) != len(parts):
+                logger.warning(
+                    "transcription_segment_count planned=%s produced=%s",
+                    len(offsets),
+                    len(parts),
+                )
             # map() yields in input order, so the transcript stays sequential
             # even though the requests run concurrently.
             with ThreadPoolExecutor(max_workers=self._max_parallel_segments) as pool:
-                parts_transcribed = list(
+                transcribed = list(
                     pool.map(
-                        lambda item: self._transcribe_part(item[0], item[1], prompt),
-                        enumerate(parts),
+                        lambda pair: self._transcribe_part(pair[0], pair[1], prompt),
+                        tuple(zip(offsets, parts, strict=False)),
                     )
                 )
             return Transcript(
-                text="\n\n".join(result.text for result in parts_transcribed),
+                text="\n\n".join(segment.text for segment in transcribed),
                 # First segment that reported a language wins; they all carry the
                 # same episode, and a disagreement is not worth reporting.
                 language=next(
-                    (
-                        result.language
-                        for result in parts_transcribed
-                        if result.language
-                    ),
+                    (segment.language for segment in transcribed if segment.language),
                     None,
                 ),
             )
 
+    def _pause_report(
+        self, path: Path
+    ) -> tuple[tuple[tuple[float, float], ...], float | None]:
+        """Decode once to report pauses and the duration; writes no output file.
+
+        A failure here is never fatal: the caller falls back to fixed-grid
+        splitting, so silence detection can only improve a cut, never break one.
+        """
+        assert self._ffmpeg_path is not None
+        try:
+            result = subprocess.run(
+                [
+                    self._ffmpeg_path,
+                    "-nostdin",
+                    "-i",
+                    str(path),
+                    "-af",
+                    f"silencedetect=noise={_PAUSE_NOISE_DB}dB:d={_MIN_PAUSE_SECONDS}",
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                capture_output=True,
+                timeout=1800,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return (), None
+        stderr = result.stderr.decode(errors="replace")
+        return _parse_pauses(stderr), _parse_media_duration(stderr)
+
     def _transcribe_part(
-        self, index: int, part: Path, prompt: str | None = None
+        self, offset: float, part: Path, prompt: str | None = None
     ) -> Transcript:
         audio = part.read_bytes()
         logger.info(
-            "transcription_segment index=%s bytes=%s",
-            index,
+            "transcription_segment offset=%.2f bytes=%s",
+            offset,
             len(audio),
         )
         text = self._send_retrying(audio, part.name, prompt)
-        marker = index * self._segment_seconds
         return Transcript(
-            text=f"[{marker // 3600:02d}:{(marker // 60) % 60:02d}] {text.text.strip()}",
+            text=f"{_format_marker(offset)} {text.text.strip()}",
             language=text.language,
         )
 

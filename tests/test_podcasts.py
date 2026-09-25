@@ -30,7 +30,10 @@ from knowledge_assistant.infrastructure.http.podcast_resolver import (
 )
 from knowledge_assistant.infrastructure.openai.transcription import (
     OpenAITranscriber,
+    _cut_points,
     _detected_language,
+    _parse_media_duration,
+    _parse_pauses,
 )
 
 
@@ -54,6 +57,18 @@ def _resolver_with(responder: Any) -> PodcastEpisodeResolver:
     return PodcastEpisodeResolver(
         client=httpx.Client(transport=httpx.MockTransport(responder))
     )
+
+
+def _wav_with_silences(path: Path, spans: list[tuple[float, float]], duration: float) -> None:
+    """A loud tone with the given spans muted, so pauses are exactly known."""
+    command = [
+        "ffmpeg", "-nostdin", "-y",
+        "-f", "lavfi", "-i", f"sine=frequency=440:duration={duration}",
+    ]
+    if spans:
+        enable = "+".join(f"between(t,{start},{end})" for start, end in spans)
+        command += ["-af", f"volume=0:enable='{enable}'"]
+    subprocess.run([*command, str(path)], check=True, capture_output=True)
 
 
 class TestClassification:
@@ -418,6 +433,113 @@ class TestOpenAITranscriber:
 
         assert peak > 1, "segments were transcribed one at a time"
         assert peak <= 3
+
+    def test_parse_pauses_reads_silencedetect_output(self) -> None:
+        stderr = (
+            "[silencedetect @ 0x1] silence_start: 4.010667\n"
+            "[silencedetect @ 0x1] silence_end: 5.531125 | silence_duration: 1.520458\n"
+        )
+        assert _parse_pauses(stderr) == ((4.010667, 5.531125),)
+        assert _parse_pauses("") == ()
+
+    def test_parse_media_duration_reads_the_duration_line(self) -> None:
+        stderr = "  Duration: 01:19:53.21, start: 0.000000, bitrate: 135 kb/s"
+        assert _parse_media_duration(stderr) == pytest.approx(4793.21)
+        assert _parse_media_duration("Duration: N/A, start: 0.000000") is None
+
+    def test_cut_points_prefer_the_longest_pause_not_the_nearest(self) -> None:
+        # The nearer pause is a 0.5s breath mid-sentence; the 2s one is the real
+        # boundary. Choosing the nearest is what produced "当年在……当年".
+        pauses = ((600.4, 600.9), (606.0, 608.0))
+        cuts = _cut_points(pauses, 1200, segment_seconds=600, window_seconds=30)
+        assert cuts == (607.0,)
+
+    def test_cut_points_fall_back_to_the_grid_without_pauses(self) -> None:
+        cuts = _cut_points((), 1800, segment_seconds=600, window_seconds=30)
+        assert cuts == (600.0, 1200.0)
+
+    def test_cut_points_ignore_pauses_outside_the_window(self) -> None:
+        cuts = _cut_points(
+            ((500.0, 502.0),), 1200, segment_seconds=600, window_seconds=30
+        )
+        assert cuts == (600.0,)
+
+    def test_cut_points_stay_strictly_ascending(self) -> None:
+        # One long pause spanning several windows must not emit a cut per mark.
+        cuts = _cut_points(
+            ((1000.0, 2000.0),), 2400, segment_seconds=600, window_seconds=30
+        )
+        assert cuts == (600.0, 1200.0, 1800.0)
+
+    def test_cut_points_cap_the_window_so_marks_never_share_a_pause(self) -> None:
+        # A pause between two marks must be claimed once, leaving the other mark
+        # on the grid, rather than being claimed twice and dropped entirely.
+        cuts = _cut_points(((6.0, 6.5),), 18, segment_seconds=6, window_seconds=30)
+        assert cuts == (6.25, 12.0)
+
+    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+    def test_segments_split_on_pauses_not_on_the_grid(self) -> None:
+        sizes: dict[int, int] = {}
+
+        class FakeClient:
+            class audio:  # noqa: N801
+                class transcriptions:  # noqa: N801
+                    @staticmethod
+                    def create(*, model: str, file: object) -> object:
+                        name, payload = cast("tuple[str, Any]", file)
+                        sizes[int(name[3:7])] = len(payload.read())
+                        return type("R", (), {"text": "ok"})()
+
+        transcriber = OpenAITranscriber(
+            client=cast(Any, FakeClient()),
+            segment_seconds=10,
+            max_direct_bytes=0,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = Path(tmp) / "tone.wav"
+            _wav_with_silences(wav, [(7, 8.5), (17, 18.5)], duration=30)
+            transcriber.transcribe(wav.read_bytes(), "audio/wav")
+
+        # 64 kbps mono, so duration ~= bytes / 8000. A blind grid split would
+        # give 10s / 10s / 10s; cutting on the pauses gives ~7.75 / 10 / 12.25.
+        durations = [sizes[index] / 8000 for index in sorted(sizes)]
+        assert durations == [
+            pytest.approx(7.75, abs=0.4),
+            pytest.approx(10.0, abs=0.4),
+            pytest.approx(12.25, abs=0.4),
+        ]
+
+    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+    def test_unbroken_audio_still_splits_on_the_grid(self) -> None:
+        sizes: dict[int, int] = {}
+
+        class FakeClient:
+            class audio:  # noqa: N801
+                class transcriptions:  # noqa: N801
+                    @staticmethod
+                    def create(*, model: str, file: object) -> object:
+                        name, payload = cast("tuple[str, Any]", file)
+                        sizes[int(name[3:7])] = len(payload.read())
+                        return type("R", (), {"text": "ok"})()
+
+        transcriber = OpenAITranscriber(
+            client=cast(Any, FakeClient()),
+            segment_seconds=6,
+            max_direct_bytes=0,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = Path(tmp) / "tone.wav"
+            _wav_with_silences(wav, [], duration=15)
+            transcriber.transcribe(wav.read_bytes(), "audio/wav")
+
+        # Nothing to cut on: identical to fixed-grid splitting, so silence
+        # detection can only improve a cut, never break one.
+        durations = [sizes[index] / 8000 for index in sorted(sizes)]
+        assert durations == [
+            pytest.approx(6.0, abs=0.4),
+            pytest.approx(6.0, abs=0.4),
+            pytest.approx(3.0, abs=0.4),
+        ]
 
 
 class TestPodcastService:
