@@ -1,9 +1,9 @@
 # Knowledge Assistant
 
-A personal knowledge engine that saves long-form articles (blog posts,
-Substack, Medium, X Articles) as canonical Markdown in your own Obsidian vault
-and answers questions with grounded, cited answers from what you saved — via a
-Telegram bot and a CLI demo.
+A personal knowledge engine that saves long-form content — blog posts, Substack
+and Medium essays, X Articles, and podcast episodes — as canonical Markdown in
+your own Obsidian vault, then answers questions with grounded, cited answers
+from what you saved. Telegram bot and CLI demo included.
 
 ## Problem
 
@@ -49,9 +49,13 @@ Real output (`weighted-hybrid-v1`, truncated):
 | Substack essays | `substack` | including `.substack.com` publications |
 | Medium articles | `medium` | with a bounded RSS fallback for HTTP 403 |
 | X Articles | `xquik_mpp` / `xquik` | Article-only; ordinary posts/threads fail clearly |
+| Xiaoyuzhou episodes | `podcast` | episode links (`/episode/<id>`), transcribed on ingest |
+| Apple Podcasts episodes | `podcast` | episode links carrying `?i=<id>`; show links are rejected |
+| Substack podcast posts | `podcast` | Substack URLs whose payload includes an audio file |
 
 Paywalled and JavaScript-only pages fail with explicit errors rather than
-ingesting garbage.
+ingesting garbage. Podcast transcription costs money per episode (see
+[Costs](#costs)); every other source is free.
 
 ## Evaluation
 
@@ -98,23 +102,63 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-Configuration lives in `.env` (required: PostgreSQL connection from the compose
-stack, `KNOWLEDGE_ASSISTANT_VAULT_PATH`, `OPENAI_API_KEY`). Optional:
+Configuration lives in `.env`; every variable is documented with comments in
+[`.env.example`](./.env.example). Required: the PostgreSQL connection from the
+compose stack, `KNOWLEDGE_ASSISTANT_VAULT_PATH`, and `OPENAI_API_KEY`. Optional:
 
-- **Telegram bot**: `TELEGRAM_TOKEN` + numeric `TELEGRAM_ALLOWED_USER_IDS`;
-  runs under the `telegram` profile (`docker compose --profile telegram up -d bot`)
-- **X Articles**: `X_ARTICLE_PROVIDER` = Tempo MPP (`tempo-auth`) or Xquik API
-  key; ~$0.00075 per Article
-- **Grafana monitoring**: `OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4318`
+- **Telegram bot**: `KNOWLEDGE_ASSISTANT_TELEGRAM_TOKEN` plus numeric
+  `KNOWLEDGE_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS`; runs under the `telegram`
+  profile (`docker compose --profile telegram up -d bot`). The bot fails closed
+  while the allowlist is empty.
+- **Podcasts**: `KNOWLEDGE_ASSISTANT_TRANSCRIPTION_MODEL`, default
+  `gpt-transcribe`
+- **X Articles**: `KNOWLEDGE_ASSISTANT_X_ARTICLE_PROVIDER` = `xquik_mpp`
+  (default, Tempo micropayments) or `xquik` with
+  `KNOWLEDGE_ASSISTANT_XQUIK_API_KEY`
+- **Grafana monitoring**:
+  `KNOWLEDGE_ASSISTANT_OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4318`
 
 Never commit `.env`. Model calls cost cents on small runs; everything else
 (`migrate`, `check-config`, `sample-ingest`, `demo ingest`) is free.
+
+### Costs
+
+| Path | Cost |
+| --- | --- |
+| Embedding + answering | fractions of a cent per question |
+| X Articles | ~$0.00075 per Article (Xquik/Tempo) |
+| Podcast episodes | $0.0045 per minute of audio (`gpt-transcribe`), so an 80-minute episode is ~$0.36 |
+
+Everything except X Articles and podcasts is free to ingest.
+
+## Testing
+
+```shell
+docker compose --profile test run --rm test          # full suite, coverage gate
+PYTHONPATH=src uv run pytest                         # local, no Docker
+```
+
+The test image bundles ffmpeg and runs the full suite with a 90% coverage gate.
+Locally, install ffmpeg or the audio-segmentation tests skip themselves.
+Database and retrieval tests skip unless a live Postgres is reachable:
+
+```shell
+docker compose --profile test run --rm \
+  -e KNOWLEDGE_ASSISTANT_DATABASE_URL="postgresql://knowledge_assistant:<password>@postgres:5432/knowledge_assistant" \
+  test
+```
+
+> **macOS note:** the local `.venv` editable-install marker can intermittently
+> pick up the `UF_HIDDEN` flag, which CPython's `site` module skips, breaking
+> plain `uv run pytest`. Use `PYTHONPATH=src uv run pytest`.
+
+There is no CI. Tests are run locally or in the Docker test image.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    S["Sources: any blog / Substack / Medium / X Article URLs"] -->|submit idempotent job| W[Worker]
+    S["Sources: blog / Substack / Medium / X Article URLs<br/>+ Xiaoyuzhou / Apple / Substack podcast episodes"] -->|submit idempotent job| W[Worker]
     W -->|fetch + extract| V[(Obsidian vault<br/>canonical Markdown)]
     W -->|chunk + embed| P[(PostgreSQL + pgvector<br/>rebuildable projection)]
     Q[Question] --> R[RetrievalOrchestrator<br/>strategy: vector / lexical / hybrid / RRF / agentic]
@@ -132,6 +176,13 @@ writes projection rows scoped to a generation. The vault Markdown is the source
 of truth — every database row can be rebuilt with `projection-rebuild` +
 atomic `projection-activate`.
 
+**Podcasts** branch off before extraction, because a podcast has no article to
+fetch: the page is resolved to an audio URL, the audio is downloaded and split,
+and speech-to-text produces the Markdown instead. The episode title is sent as a
+transcription prompt so names survive (otherwise `BitMEX` comes back as `BTX`),
+and the model's detected language is recorded on the document. Everything after
+the transcript joins the pipeline above unchanged.
+
 **Answering**: the question retrieves candidate chunks from the active
 projection (semantic, lexical, weighted hybrid, RRF, or bounded agentic
 decomposition), a diversity reranker bounds the context, and a structured
@@ -142,11 +193,39 @@ whose citations don't resolve to the retrieved evidence.
 questions, answers, or URLs) and feeds a Grafana dashboard provisioned
 automatically from `config/grafana/`.
 
+## Project structure
+
+```text
+src/knowledge_assistant/
+├── domain/          entities and invariants: documents, chunks, sources, podcasts, retrieval
+├── ports/           interfaces the application owns: vault, embeddings, transcription, answers
+├── application/     use cases: worker, bot, podcasts, questions, retrieval, projections, deletion
+├── infrastructure/  adapters: postgres, openai, vault, http fetchers, telegram, telemetry
+└── cli.py           entrypoint behind every command in compose.yaml
+config/grafana/      provisioned dashboard (7 panels)
+data/sample/         committed evaluation dataset and result summaries
+docs/operations/     runbooks, e.g. rotating the Tempo key
+scripts/             one-off maintenance scripts
+tests/               pytest suite
+```
+
+The vault the application writes is separate from this repository and is not
+committed. Articles land under `Articles/<provider>/<topic>/` and podcasts under
+`Podcasts/<platform>/<topic>/`.
+
 ## Limitations
 
 - The benchmark is a 25-case sample over 4 documents; scores are indicative,
   not significant. The judge scores are uncalibrated model opinions.
 - JavaScript-only pages can't be extracted and fail explicitly.
-- X Articles require the paid Xquik/Tempo path; other sources are free.
+- X Articles require the paid Xquik/Tempo path; podcasts require paid
+  transcription. Other sources are free.
+- Podcast segmentation cuts on detected pauses; shows with music under the
+  voice or no real quiet between speakers fall back to fixed 10-minute cuts,
+  which can split a word at the boundary.
+- A mistranscribed podcast transcript is written to the vault as fact. Unlike a
+  failed fetch, it reports success — nothing flags an error after the fact.
+- There is no CI and no public deployment; the system runs locally via Docker
+  Compose.
 - Article bodies stay in your vault and are never committed; copyright belongs
   to the authors.
