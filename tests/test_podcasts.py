@@ -11,7 +11,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 import httpx
 import pytest
@@ -19,7 +19,7 @@ from openai import InternalServerError
 
 from knowledge_assistant.application.podcasts import PodcastService
 from knowledge_assistant.domain.documents import DocumentId, SourceType
-from knowledge_assistant.domain.podcasts import PodcastEpisode
+from knowledge_assistant.domain.podcasts import PodcastEpisode, Transcript
 from knowledge_assistant.domain.sources import (
     ExtractionError,
     SourceClassifier,
@@ -28,18 +28,26 @@ from knowledge_assistant.domain.sources import (
 from knowledge_assistant.infrastructure.http.podcast_resolver import (
     PodcastEpisodeResolver,
 )
-from knowledge_assistant.infrastructure.openai.transcription import OpenAITranscriber
+from knowledge_assistant.infrastructure.openai.transcription import (
+    OpenAITranscriber,
+    _detected_language,
+)
 
 
 class FakeTranscriber:
-    def __init__(self) -> None:
+    def __init__(self, language: str | None = "zh") -> None:
         self.calls: list[bytes] = []
         self.prompts: list[str | None] = []
+        self._language = language
 
-    def transcribe(self, audio: bytes, mime: str, prompt: str | None = None) -> str:
+    def transcribe(
+        self, audio: bytes, mime: str, prompt: str | None = None
+    ) -> Transcript:
         self.calls.append(audio)
         self.prompts.append(prompt)
-        return f"transcript({len(audio)} bytes, {mime})"
+        return Transcript(
+            text=f"transcript({len(audio)} bytes, {mime})", language=self._language
+        )
 
 
 def _resolver_with(responder: Any) -> PodcastEpisodeResolver:
@@ -205,8 +213,23 @@ class TestOpenAITranscriber:
             client=cast(Any, FakeClient()), model="whisper-1", ffmpeg_path=None
         )
         text = transcriber.transcribe(b"tiny", "audio/mp4")
-        assert text == "hello"
+        assert text.text == "hello"
         assert calls[0][0] == "whisper-1"
+
+    def test_detected_language_accepts_both_response_shapes(self) -> None:
+        class Entry:
+            code: ClassVar[str] = "ZH-cn"
+
+        class ObjectResponse:
+            languages: ClassVar[list[Entry]] = [Entry()]
+
+        assert (
+            _detected_language({"languages": [{"code": "zh"}]}) == "zh"
+        )
+        assert _detected_language(ObjectResponse()) == "zh-cn"
+        # whisper-1 with the default response format reports no language at all.
+        assert _detected_language({"text": "hello"}) is None
+        assert _detected_language({"languages": []}) is None
 
     def test_unsupported_mime_requires_ffmpeg(self) -> None:
         transcriber = OpenAITranscriber(client=cast(Any, object()), ffmpeg_path=None)
@@ -281,7 +304,7 @@ class TestOpenAITranscriber:
         segments = sorted(set(attempts))
         assert len(segments) >= 2
         assert [attempts.count(name) for name in segments] == [2] * len(segments)
-        assert text.count("ok") == len(segments)
+        assert text.text.count("ok") == len(segments)
 
     @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
     def test_segmentation_produces_timestamped_chunks(self) -> None:
@@ -316,10 +339,42 @@ class TestOpenAITranscriber:
             )
             text = transcriber.transcribe(wav.read_bytes(), "audio/wav")
 
-        markers = [line.split()[0] for line in text.strip().split("\n\n")]
+        markers = [line.split()[0] for line in text.text.strip().split("\n\n")]
         assert len(markers) >= 2
         assert markers[0] == "[00:00]"
         assert markers[1] == "[00:01]"
+
+    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+    def test_segmented_path_reports_the_detected_language(self) -> None:
+        class FakeClient:
+            class audio:  # noqa: N801
+                class transcriptions:  # noqa: N801
+                    @staticmethod
+                    def create(*, model: str, file: object) -> object:
+                        return type(
+                            "R", (), {"text": "ok", "languages": [{"code": "zh"}]}
+                        )()
+
+        transcriber = OpenAITranscriber(
+            client=cast(Any, FakeClient()),
+            segment_seconds=60,
+            max_direct_bytes=0,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = Path(tmp) / "tone.wav"
+            subprocess.run(
+                [
+                    "ffmpeg", "-nostdin", "-y",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=120",
+                    str(wav),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            transcript = transcriber.transcribe(wav.read_bytes(), "audio/wav")
+
+        assert transcript.language == "zh"
+        assert transcript.text.count("ok") >= 2
 
     @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
     def test_segments_are_transcribed_concurrently(self) -> None:
@@ -394,6 +449,8 @@ class TestPodcastService:
         assert "## Show notes" in article.markdown
         assert "transcript(5 bytes, audio/mpeg)" in article.markdown
         assert service.extractor_label == "podcast-transcript-whisper-1"
+        # The model's reported language rides along to the document.
+        assert article.language == "zh"
         # The episode title is what keeps BitMEX/Bybit spelled correctly.
         assert fake_transcriber.prompts == ["Ep 1 Show"]
 

@@ -93,6 +93,7 @@ class ExtractedArticle:
     published_at: datetime | None
     canonical_url: str
     images: tuple[ExtractedImage, ...] = ()
+    language: str | None = None
 
 
 class SourceClassifier:

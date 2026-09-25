@@ -83,13 +83,14 @@ class PodcastService:
         sections = ["\n".join(line for line in header_lines if line)]
         if episode.shownotes_markdown:
             sections.append("## Show notes\n\n" + episode.shownotes_markdown)
-        sections.append("## Transcript\n\n" + transcript.strip())
+        sections.append("## Transcript\n\n" + transcript.text.strip())
         return ExtractedArticle(
             title=episode.title,
             markdown="\n\n".join(sections),
             authors=(episode.show,) if episode.show else (),
             published_at=episode.published_at,
             canonical_url=canonical_url,
+            language=transcript.language,
         )
 
 

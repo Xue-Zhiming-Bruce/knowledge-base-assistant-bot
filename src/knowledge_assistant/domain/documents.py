@@ -14,6 +14,9 @@ from urllib.parse import urlsplit
 from knowledge_assistant.domain.errors import InvariantViolationError
 
 SCHEMA_VERSION = 2
+# Assumed only when the extractor reports nothing. Transcription models that do
+# report a language (gpt-transcribe) override this.
+DEFAULT_LANGUAGE = "en"
 _IDENTIFIER_PATTERN = re.compile(r"^(doc|rev)_[a-f0-9]{32}$")
 _SHA256_PATTERN = re.compile(r"^sha256:[a-f0-9]{64}$")
 _IMAGE_CONTENT_TYPES = frozenset({"image/gif", "image/jpeg", "image/png", "image/webp"})
@@ -235,7 +238,7 @@ class KnowledgeDocument:
         authors: tuple[str, ...] = (),
         published_at: datetime | None = None,
         acquired_at: datetime | None = None,
-        language: str = "en",
+        language: str = DEFAULT_LANGUAGE,
         ingestion: IngestionProvenance,
         source_urls: tuple[str, ...] | None = None,
         assets: tuple[DocumentAsset, ...] = (),

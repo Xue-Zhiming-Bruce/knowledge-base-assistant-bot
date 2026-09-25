@@ -19,6 +19,7 @@ from knowledge_assistant.application.assets import ArticleAssetMaterializer
 from knowledge_assistant.application.podcasts import PodcastService
 from knowledge_assistant.domain.chunks import MarkdownChunker
 from knowledge_assistant.domain.documents import (
+    DEFAULT_LANGUAGE,
     DocumentId,
     IngestionProvenance,
     KnowledgeDocument,
@@ -188,6 +189,7 @@ class IngestionWorker:
                     normalizer_version="markdown-assets-v6",
                 ),
                 assets=materialized.metadata,
+                language=article.language or DEFAULT_LANGUAGE,
             )
             self._repository.transition(
                 job.job_id,

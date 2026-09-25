@@ -20,6 +20,7 @@ from openai import (
     RateLimitError,
 )
 
+from knowledge_assistant.domain.podcasts import Transcript
 from knowledge_assistant.domain.sources import ExtractionError
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,27 @@ _SEGMENT_SECONDS = 600
 # A transient failure on segment N must not throw away segments 0..N-1: the
 # job-level retry re-downloads the audio and transcribes from segment 0 again.
 _SEGMENT_ATTEMPTS = 3
+
+
+def _detected_language(response: Any) -> str | None:
+    """First language the model reported, or None when it reported none.
+
+    gpt-transcribe answers with ``languages: [{"code": "zh"}]``; whisper-1 with
+    the default response format reports nothing at all.
+    """
+    if isinstance(response, dict):
+        languages = response.get("languages")
+    else:
+        languages = getattr(response, "languages", None)
+    for entry in languages or []:
+        code = (
+            entry.get("code")
+            if isinstance(entry, dict)
+            else getattr(entry, "code", None)
+        )
+        if code:
+            return str(code).strip().lower()
+    return None
 # Segments are independent requests. Three in flight keeps wall-clock near
 # 1/3 of sequential without stampeding a marginal uplink.
 _MAX_PARALLEL_SEGMENTS = 3
@@ -78,13 +100,15 @@ class OpenAITranscriber:
         self._retry_delay_seconds = retry_delay_seconds
         self._max_parallel_segments = max(1, max_parallel_segments)
 
-    def transcribe(self, audio: bytes, mime: str, prompt: str | None = None) -> str:
+    def transcribe(
+        self, audio: bytes, mime: str, prompt: str | None = None
+    ) -> Transcript:
         filename = _SUPPORTED_EXTENSIONS.get(mime.split(";")[0].strip().lower())
         if filename is not None and len(audio) <= self._max_direct_bytes:
             return self._send(audio, filename, prompt)
         return self._transcribe_segmented(audio, prompt)
 
-    def _transcribe_segmented(self, audio: bytes, prompt: str | None = None) -> str:
+    def _transcribe_segmented(self, audio: bytes, prompt: str | None = None) -> Transcript:
         if self._ffmpeg_path is None:
             raise ExtractionError(
                 "Audio is too large for a single transcription request and "
@@ -133,15 +157,29 @@ class OpenAITranscriber:
             # map() yields in input order, so the transcript stays sequential
             # even though the requests run concurrently.
             with ThreadPoolExecutor(max_workers=self._max_parallel_segments) as pool:
-                texts = list(
+                parts_transcribed = list(
                     pool.map(
                         lambda item: self._transcribe_part(item[0], item[1], prompt),
                         enumerate(parts),
                     )
                 )
-            return "\n\n".join(texts)
+            return Transcript(
+                text="\n\n".join(result.text for result in parts_transcribed),
+                # First segment that reported a language wins; they all carry the
+                # same episode, and a disagreement is not worth reporting.
+                language=next(
+                    (
+                        result.language
+                        for result in parts_transcribed
+                        if result.language
+                    ),
+                    None,
+                ),
+            )
 
-    def _transcribe_part(self, index: int, part: Path, prompt: str | None = None) -> str:
+    def _transcribe_part(
+        self, index: int, part: Path, prompt: str | None = None
+    ) -> Transcript:
         audio = part.read_bytes()
         logger.info(
             "transcription_segment index=%s bytes=%s",
@@ -150,11 +188,14 @@ class OpenAITranscriber:
         )
         text = self._send_retrying(audio, part.name, prompt)
         marker = index * self._segment_seconds
-        return f"[{marker // 3600:02d}:{(marker // 60) % 60:02d}] {text.strip()}"
+        return Transcript(
+            text=f"[{marker // 3600:02d}:{(marker // 60) % 60:02d}] {text.text.strip()}",
+            language=text.language,
+        )
 
     def _send_retrying(
         self, audio: bytes, filename: str, prompt: str | None = None
-    ) -> str:
+    ) -> Transcript:
         """Send one segment, retrying it in place before failing the whole job."""
         delay = self._retry_delay_seconds
         for attempt in range(_SEGMENT_ATTEMPTS):
@@ -167,7 +208,9 @@ class OpenAITranscriber:
                 delay *= 4
         raise AssertionError("unreachable")
 
-    def _send(self, audio: bytes, filename: str, prompt: str | None = None) -> str:
+    def _send(
+        self, audio: bytes, filename: str, prompt: str | None = None
+    ) -> Transcript:
         # OpenAI SDK errors propagate unwrapped: RateLimitError/timeout remain
         # retryable in the worker's failure classifier. An empty prompt is
         # omitted rather than sent as "", which some models reject.
@@ -179,4 +222,4 @@ class OpenAITranscriber:
         text = getattr(response, "text", None)
         if not text or not str(text).strip():
             raise ExtractionError("Transcription returned no text.")
-        return str(text)
+        return Transcript(text=str(text), language=_detected_language(response))
