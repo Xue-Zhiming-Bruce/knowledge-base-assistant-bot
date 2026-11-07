@@ -126,6 +126,7 @@ Never commit `.env`. Model calls cost cents on small runs; everything else
 | Path | Cost |
 | --- | --- |
 | Embedding + answering | fractions of a cent per question |
+| `ingest <url>` (CLI) or bot ingest | same as the row below — the CLI and the bot share one ingestion path |
 | X Articles | ~$0.00075 per Article (Xquik/Tempo) |
 | Podcast episodes | $0.0045 per minute of audio (`gpt-transcribe`), so an 80-minute episode is ~$0.36 |
 

@@ -124,6 +124,23 @@ def build_parser() -> argparse.ArgumentParser:
         "migrate",
         help="apply pending PostgreSQL schema migrations",
     )
+    ingest = subparsers.add_parser(
+        "ingest",
+        help="submit one article or podcast URL to the ingestion queue",
+    )
+    ingest.add_argument("url")
+    ingest.add_argument(
+        "--recipient",
+        type=int,
+        default=None,
+        help="numeric Telegram chat id for completion notifications "
+        "(default: first allowlisted user id; omit for notification-free ingestion)",
+    )
+    delete = subparsers.add_parser(
+        "delete",
+        help="delete one article by exact title from the vault and the index",
+    )
+    delete.add_argument("title")
     subparsers.add_parser("run-bot", help="run the Telegram long-polling service")
     subparsers.add_parser("run-worker", help="run the asynchronous ingestion worker")
     health = subparsers.add_parser("healthcheck", help="check a service heartbeat")
@@ -325,6 +342,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print("database schema is up to date")
         return 0
+    if args.command == "ingest":
+        return _run_ingest(settings, url=args.url, recipient=args.recipient)
+    if args.command == "delete":
+        return _run_delete(settings, title=args.title)
     if args.command == "healthcheck":
         repository = PostgresIngestionRepository(settings.database_url)
         try:
@@ -909,7 +930,7 @@ def _run_answer_eval(
 
 
 def _resolve_recipient(settings: Settings, recipient: int | None) -> int | None:
-    """Resolve the completion-notification recipient for sample/prefect ingestion.
+    """Resolve the completion-notification recipient for CLI ingestion.
 
     Explicit ``--recipient`` wins; otherwise the first allowlisted user is used
     when Telegram is configured; otherwise ``None`` means notification-free
@@ -978,6 +999,71 @@ def _run_answer_calibrate(
         output_markdown.parent.mkdir(parents=True, exist_ok=True)
         output_markdown.write_text(render_calibration_markdown(report), encoding="utf-8")
     return 0
+
+
+def _run_ingest(settings: Settings, *, url: str, recipient: int | None) -> int:
+    """Submit one operator-supplied URL: the non-Telegram ingestion door."""
+
+    try:
+        classified = SourceClassifier().classify(url)
+    except UnsupportedSourceError as error:
+        print(json.dumps({"status": "rejected", "reason": str(error)}, sort_keys=True))
+        return 2
+    resolved_recipient = _resolve_recipient(settings, recipient)
+    repository = PostgresIngestionRepository(settings.database_url)
+    try:
+        submission = repository.submit(
+            # Stable per source, so a retried fetch never pays twice for one URL.
+            idempotency_key=f"cli:{classified.normalized_source_key}",
+            source=classified,
+            recipient_key=str(resolved_recipient) if resolved_recipient is not None else None,
+            request_message_id="0" if resolved_recipient is not None else None,
+        )
+    except Exception as error:
+        print(
+            json.dumps(
+                {"status": "not_run", "reason": f"database unavailable: {error}"},
+                sort_keys=True,
+            )
+        )
+        return 2
+    finally:
+        repository.close()
+    print(
+        json.dumps(
+            {
+                "status": "ok",
+                "job_id": str(submission.job_id),
+                "state": submission.state.value,
+                "created": submission.created,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _run_delete(settings: Settings, *, title: str) -> int:
+    """Delete one article by exact title; ambiguous input deletes nothing."""
+
+    repository = PostgresIngestionRepository(settings.database_url)
+    try:
+        result = ArticleDeletionService(
+            registry=repository,
+            vault=FileSystemVaultRepository(settings.vault_path),
+        ).delete_by_title(title)
+    finally:
+        repository.close()
+    if result.deleted:
+        print(json.dumps({"status": "deleted", "title": result.deleted_title}, sort_keys=True))
+        return 0
+    print(
+        json.dumps(
+            {"status": "not_deleted", "suggestions": list(result.suggestions)},
+            sort_keys=True,
+        )
+    )
+    return 1
 
 
 def _run_sample_ingest(settings: Settings, *, manifest: Path, recipient: int | None) -> int:

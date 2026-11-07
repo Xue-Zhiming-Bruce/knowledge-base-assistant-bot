@@ -89,9 +89,9 @@ class Settings:
         if not 60 <= session_ttl_seconds <= 86_400:
             raise ConfigurationError("SESSION_TTL_SECONDS must be between 60 and 86400")
 
+        # Optional: a production deployment may be headless (no Telegram door),
+        # so only the bot service requires a token (`Settings.require_bot`).
         telegram_token = environ.get(f"{prefix}TELEGRAM_TOKEN") or None
-        if environment is Environment.PRODUCTION and telegram_token is None:
-            raise ConfigurationError("TELEGRAM_TOKEN is required in production")
 
         allowed_user_ids = cls._parse_user_ids(
             environ.get(f"{prefix}TELEGRAM_ALLOWED_USER_IDS", "")

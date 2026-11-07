@@ -66,12 +66,17 @@ def test_settings_reject_invalid_values(
         Settings.from_environment(environment)
 
 
-def test_production_requires_telegram_token(tmp_path: Path) -> None:
+def test_production_allows_headless_configuration(tmp_path: Path) -> None:
     environment = valid_environment(tmp_path)
     environment["KNOWLEDGE_ASSISTANT_ENVIRONMENT"] = "production"
 
+    settings = Settings.from_environment(environment)
+
+    # A headless worker needs no Telegram door; the bot service still refuses to
+    # start without a token and an allowlist.
+    assert settings.telegram_token is None
     with pytest.raises(ConfigurationError, match="TELEGRAM_TOKEN"):
-        Settings.from_environment(environment)
+        settings.require_bot()
 
 
 @pytest.mark.parametrize(
